@@ -10,78 +10,15 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .audio import adjust_audio_speed, combine_audio_segments, get_audio_duration_ms
+from .audio import combine_audio_segments
 from .clients import LLMClient, TTSClient
 from .parsers import Subtitle, parse_srt
-from .processors import AudioTagProcessor
+from .processors import AudioTagProcessor, SubtitleProcessor
 
 logger = logging.getLogger(__name__)
 
 # 前後何エントリーをコンテキストとして使用するか
 CONTEXT_WINDOW = 2
-
-
-def process_subtitle(
-    subtitle: Subtitle,
-    tts_client: TTSClient | None,
-    audio_tag_processor: AudioTagProcessor | None,
-    temp_dir: Path | None,
-    prev_texts: list[str] | None = None,
-    next_texts: list[str] | None = None,
-) -> tuple[int, Path | None, str]:
-    """
-    1つの字幕を処理して音声ファイルを生成する
-
-    Args:
-        subtitle: 字幕データ
-        tts_client: TTSクライアント（Noneの場合はTTSをスキップ）
-        audio_tag_processor: オーディオタグプロセッサ（Noneの場合はタグ付けをスキップ）
-        temp_dir: 一時ファイル用ディレクトリ
-        prev_texts: 前のエントリーのテキストリスト
-        next_texts: 次のエントリーのテキストリスト
-
-    Returns:
-        (開始時間ms, 音声ファイルパス, タグ付きテキスト)のタプル
-    """
-    text = subtitle.text
-
-    # オーディオタグを付与
-    if audio_tag_processor:
-        try:
-            tagged_text = audio_tag_processor.add_tags(
-                text,
-                prev_texts=prev_texts,
-                next_texts=next_texts,
-                entry_index=subtitle.index,
-            )
-            print(f"    [タグ付与成功]")
-            print(f"    元テキスト: {text}")
-            print(f"    タグ付き: {tagged_text}")
-            text = tagged_text
-        except Exception as e:
-            print(f"    [タグ付与エラー] {e}")
-            traceback.print_exc()
-
-    # TTSクライアントがない場合はスキップ
-    if not tts_client or not temp_dir:
-        return (subtitle.start_ms, None, text)
-
-    # 音声を生成
-    raw_audio_path = temp_dir / f"raw_{subtitle.index}.mp3"
-    tts_client.synthesize(text, raw_audio_path)
-
-    # 音声の長さを確認
-    audio_duration = get_audio_duration_ms(raw_audio_path)
-    target_duration = subtitle.duration_ms
-
-    if audio_duration > target_duration:
-        # 速度調整が必要
-        adjusted_path = temp_dir / f"adjusted_{subtitle.index}.mp3"
-        adjust_audio_speed(raw_audio_path, target_duration, adjusted_path)
-        print(f"    速度調整: {audio_duration}ms -> {target_duration}ms")
-        return (subtitle.start_ms, adjusted_path, text)
-
-    return (subtitle.start_ms, raw_audio_path, text)
 
 
 def save_tagged_json(
@@ -135,6 +72,8 @@ def process_srt_file(
     use_audio_tags: bool = True,
     json_only: bool = False,
     debug: bool = False,
+    speed_threshold: float = 0.85,
+    max_shorten_retries: int = 2,
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -145,12 +84,16 @@ def process_srt_file(
         use_audio_tags: オーディオタグを使用するか
         json_only: TTSをスキップしてJSONのみ出力するか
         debug: デバッグモードを有効にするか（詳細ログ出力）
+        speed_threshold: 速度調整の閾値（これ以下で再意訳）
+        max_shorten_retries: 再意訳の最大リトライ回数
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
     print(f"オーディオタグ使用: {use_audio_tags}")
     print(f"JSONのみ: {json_only}")
     print(f"デバッグモード: {debug}")
+    print(f"速度調整閾値: {speed_threshold}")
+    print(f"最大リトライ回数: {max_shorten_retries}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -175,6 +118,14 @@ def process_srt_file(
             print(f"[LLM] 初期化エラー: {e}")
             traceback.print_exc()
 
+    # 字幕プロセッサを初期化
+    subtitle_processor = SubtitleProcessor(
+        tts_client=tts_client,
+        audio_tag_processor=audio_tag_processor,
+        speed_threshold=speed_threshold,
+        max_shorten_retries=max_shorten_retries,
+    )
+
     # 処理
     audio_segments: list[tuple[int, Path]] = []
     tagged_texts: list[str] = []
@@ -186,11 +137,9 @@ def process_srt_file(
             prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
             next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
 
-            _, _, tagged_text = process_subtitle(
+            _, _, tagged_text = subtitle_processor.process(
                 subtitle,
-                None,
-                audio_tag_processor,
-                None,
+                temp_dir=None,
                 prev_texts=prev_texts if prev_texts else None,
                 next_texts=next_texts if next_texts else None,
             )
@@ -205,11 +154,9 @@ def process_srt_file(
                 prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
                 next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
 
-                start_ms, audio_path, tagged_text = process_subtitle(
+                start_ms, audio_path, tagged_text = subtitle_processor.process(
                     subtitle,
-                    tts_client,
-                    audio_tag_processor,
-                    temp_path,
+                    temp_dir=temp_path,
                     prev_texts=prev_texts if prev_texts else None,
                     next_texts=next_texts if next_texts else None,
                 )
@@ -254,6 +201,18 @@ def main() -> None:
         action="store_true",
         help="デバッグモードを有効にする（LLMコンテキストと応答を詳細出力）",
     )
+    parser.add_argument(
+        "--speed-threshold",
+        type=float,
+        default=0.85,
+        help="速度調整の閾値（デフォルト: 0.85）。これ以下で再意訳を試行",
+    )
+    parser.add_argument(
+        "--max-shorten-retries",
+        type=int,
+        default=1,
+        help="再意訳の最大リトライ回数（デフォルト: 1）",
+    )
 
     args = parser.parse_args()
 
@@ -282,6 +241,8 @@ def main() -> None:
         use_audio_tags=not args.no_tags,
         json_only=args.json_only,
         debug=args.debug,
+        speed_threshold=args.speed_threshold,
+        max_shorten_retries=args.max_shorten_retries,
     )
 
 
