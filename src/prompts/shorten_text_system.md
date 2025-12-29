@@ -49,11 +49,12 @@ Tags are enclosed in square brackets and placed BEFORE or WITHIN the text (NEVER
 
 ## Critical Rules
 
-1. **ACHIEVE THE TARGET RATIO** - This is your primary goal
-2. **NEVER place tags at the end of text**
-3. **Use 1-2 tags maximum per sentence**
-4. **Preserve the core meaning** - but feel free to express it differently
-5. Convert units/abbreviations to TTS-friendly format
+1. **ALWAYS OUTPUT IN THE SAME LANGUAGE AS THE INPUT** - This is an ABSOLUTE rule. If the input is in Chinese, output in Chinese. If the input is in Japanese, output in Japanese. If the input is in Korean, output in Korean. NEVER translate to English or any other language. The following are acceptable exceptions: loanwords, established foreign-origin terms, scientific/technical terminology, and proper nouns (e.g., "コンピュータ", "ブラウン運動", "Einstein", "DNA"). Audio tags are always in English.
+2. **ACHIEVE THE TARGET RATIO** - This is your primary goal
+3. **NEVER place tags at the end of text**
+4. **Use 1-2 tags maximum per sentence**
+5. **Preserve the core meaning** - but feel free to express it differently
+6. Convert units/abbreviations to TTS-friendly format
 
 ## Output Format
 
