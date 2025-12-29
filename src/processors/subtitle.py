@@ -138,7 +138,8 @@ class SubtitleProcessor:
                 return (start_ms, raw_audio_path, text)
 
             # 速度調整が必要
-            speed_ratio = available_total / audio_duration
+            # 速度比を0-1の範囲にクランプ（エッジケース対策）
+            speed_ratio = max(0.0, min(1.0, available_total / audio_duration))
 
             if speed_ratio >= self.speed_threshold:
                 # 閾値内なので速度調整して終了
@@ -215,6 +216,12 @@ class SubtitleProcessor:
         else:
             # 最後のエントリー: 十分な余裕を持たせる
             available_end = subtitle.end_ms + 10000
+
+        # エントリー間が狭すぎる場合、最低限の時間枠を確保
+        if available_end <= available_start:
+            # 元のタイムスタンプをフォールバックとして使用
+            available_start = subtitle.start_ms
+            available_end = subtitle.end_ms
 
         return (available_start, available_end)
 
