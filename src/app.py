@@ -14,21 +14,28 @@ from .clients import LLMClient, TTSClient
 from .parsers import Subtitle, parse_srt
 from .processors import AudioTagProcessor
 
+# 前後何エントリーをコンテキストとして使用するか
+CONTEXT_WINDOW = 2
+
 
 def process_subtitle(
     subtitle: Subtitle,
-    tts_client: TTSClient,
+    tts_client: TTSClient | None,
     audio_tag_processor: AudioTagProcessor | None,
-    temp_dir: Path,
-) -> tuple[int, Path, str]:
+    temp_dir: Path | None,
+    prev_texts: list[str] | None = None,
+    next_texts: list[str] | None = None,
+) -> tuple[int, Path | None, str]:
     """
     1つの字幕を処理して音声ファイルを生成する
 
     Args:
         subtitle: 字幕データ
-        tts_client: TTSクライアント
+        tts_client: TTSクライアント（Noneの場合はTTSをスキップ）
         audio_tag_processor: オーディオタグプロセッサ（Noneの場合はタグ付けをスキップ）
         temp_dir: 一時ファイル用ディレクトリ
+        prev_texts: 前のエントリーのテキストリスト
+        next_texts: 次のエントリーのテキストリスト
 
     Returns:
         (開始時間ms, 音声ファイルパス, タグ付きテキスト)のタプル
@@ -38,7 +45,11 @@ def process_subtitle(
     # オーディオタグを付与
     if audio_tag_processor:
         try:
-            tagged_text = audio_tag_processor.add_tags(text)
+            tagged_text = audio_tag_processor.add_tags(
+                text,
+                prev_texts=prev_texts,
+                next_texts=next_texts,
+            )
             print(f"    [タグ付与成功]")
             print(f"    元テキスト: {text}")
             print(f"    タグ付き: {tagged_text}")
@@ -46,6 +57,10 @@ def process_subtitle(
         except Exception as e:
             print(f"    [タグ付与エラー] {e}")
             traceback.print_exc()
+
+    # TTSクライアントがない場合はスキップ
+    if not tts_client or not temp_dir:
+        return (subtitle.start_ms, None, text)
 
     # 音声を生成
     raw_audio_path = temp_dir / f"raw_{subtitle.index}.mp3"
@@ -110,7 +125,12 @@ def save_tagged_json(
         traceback.print_exc()
 
 
-def process_srt_file(srt_path: Path, output_path: Path, use_audio_tags: bool = True) -> None:
+def process_srt_file(
+    srt_path: Path,
+    output_path: Path,
+    use_audio_tags: bool = True,
+    json_only: bool = False,
+) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
 
@@ -118,19 +138,24 @@ def process_srt_file(srt_path: Path, output_path: Path, use_audio_tags: bool = T
         srt_path: 入力SRTファイルのパス
         output_path: 出力音声ファイルのパス
         use_audio_tags: オーディオタグを使用するか
+        json_only: TTSをスキップしてJSONのみ出力するか
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
     print(f"オーディオタグ使用: {use_audio_tags}")
+    print(f"JSONのみ: {json_only}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
     print(f"字幕数: {len(subtitles)}")
 
-    # クライアントを初期化
-    tts_client = TTSClient()
-    print("[TTS] クライアント初期化完了")
+    # TTSクライアントを初期化（json_onlyの場合はスキップ）
+    tts_client = None
+    if not json_only:
+        tts_client = TTSClient()
+        print("[TTS] クライアント初期化完了")
 
+    # オーディオタグプロセッサを初期化
     audio_tag_processor = None
     if use_audio_tags:
         try:
@@ -143,27 +168,53 @@ def process_srt_file(srt_path: Path, output_path: Path, use_audio_tags: bool = T
             print(f"[LLM] 初期化エラー: {e}")
             traceback.print_exc()
 
-    # 一時ディレクトリで処理
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        audio_segments: list[tuple[int, Path]] = []
-        tagged_texts: list[str] = []
+    # 処理
+    audio_segments: list[tuple[int, Path]] = []
+    tagged_texts: list[str] = []
 
-        # 各字幕を処理
-        for subtitle in subtitles:
+    if json_only:
+        # JSONのみモード：一時ディレクトリ不要
+        for i, subtitle in enumerate(subtitles):
             print(f"処理中: [{subtitle.index}] {subtitle.text[:30]}...")
-            start_ms, audio_path, tagged_text = process_subtitle(
-                subtitle, tts_client, audio_tag_processor, temp_path
-            )
-            audio_segments.append((start_ms, audio_path))
-            tagged_texts.append(tagged_text)
+            prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
+            next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
 
-        # 全ての音声を結合
-        print("音声を結合中...")
-        combine_audio_segments(audio_segments, output_path)
+            _, _, tagged_text = process_subtitle(
+                subtitle,
+                None,
+                audio_tag_processor,
+                None,
+                prev_texts=prev_texts if prev_texts else None,
+                next_texts=next_texts if next_texts else None,
+            )
+            tagged_texts.append(tagged_text)
+    else:
+        # 通常モード：一時ディレクトリで処理
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            for i, subtitle in enumerate(subtitles):
+                print(f"処理中: [{subtitle.index}] {subtitle.text[:30]}...")
+                prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
+                next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
+
+                start_ms, audio_path, tagged_text = process_subtitle(
+                    subtitle,
+                    tts_client,
+                    audio_tag_processor,
+                    temp_path,
+                    prev_texts=prev_texts if prev_texts else None,
+                    next_texts=next_texts if next_texts else None,
+                )
+                if audio_path:
+                    audio_segments.append((start_ms, audio_path))
+                tagged_texts.append(tagged_text)
+
+            # 全ての音声を結合
+            print("音声を結合中...")
+            combine_audio_segments(audio_segments, output_path)
 
     # タグ付きJSONを保存
-    print(f"[DEBUG] tagged_texts数: {len(tagged_texts)}")
     json_output_path = output_path.with_suffix(".json")
     save_tagged_json(srt_path, subtitles, tagged_texts, json_output_path)
 
@@ -179,12 +230,17 @@ def main() -> None:
     parser.add_argument(
         "-o",
         "--output",
-        help="出力ファイルのパス（省略時は入力ファイル名.mp3）",
+        help="出力ファイルのパス（省略時は入力ファイル名.mp3/.json）",
     )
     parser.add_argument(
         "--no-tags",
         action="store_true",
         help="オーディオタグの付与をスキップする",
+    )
+    parser.add_argument(
+        "--json-only",
+        action="store_true",
+        help="TTSをスキップしてオーディオタグ付きJSONのみを出力する",
     )
 
     args = parser.parse_args()
@@ -197,9 +253,15 @@ def main() -> None:
     if args.output:
         output_path = Path(args.output)
     else:
-        output_path = Path("output") / f"{input_path.stem}.mp3"
+        suffix = ".json" if args.json_only else ".mp3"
+        output_path = Path("output") / f"{input_path.stem}{suffix}"
 
-    process_srt_file(input_path, output_path, use_audio_tags=not args.no_tags)
+    process_srt_file(
+        input_path,
+        output_path,
+        use_audio_tags=not args.no_tags,
+        json_only=args.json_only,
+    )
 
 
 if __name__ == "__main__":

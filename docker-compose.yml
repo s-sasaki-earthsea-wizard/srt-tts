@@ -4,5 +4,6 @@ services:
     env_file:
       - .env
     volumes:
+      - ./src:/app/src
       - ./srt:/app/srt
       - ./output:/app/output
