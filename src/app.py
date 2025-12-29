@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 import sys
 import tempfile
 import traceback
@@ -13,6 +14,8 @@ from .audio import adjust_audio_speed, combine_audio_segments, get_audio_duratio
 from .clients import LLMClient, TTSClient
 from .parsers import Subtitle, parse_srt
 from .processors import AudioTagProcessor
+
+logger = logging.getLogger(__name__)
 
 # 前後何エントリーをコンテキストとして使用するか
 CONTEXT_WINDOW = 2
@@ -49,6 +52,7 @@ def process_subtitle(
                 text,
                 prev_texts=prev_texts,
                 next_texts=next_texts,
+                entry_index=subtitle.index,
             )
             print(f"    [タグ付与成功]")
             print(f"    元テキスト: {text}")
@@ -130,6 +134,7 @@ def process_srt_file(
     output_path: Path,
     use_audio_tags: bool = True,
     json_only: bool = False,
+    debug: bool = False,
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -139,11 +144,13 @@ def process_srt_file(
         output_path: 出力音声ファイルのパス
         use_audio_tags: オーディオタグを使用するか
         json_only: TTSをスキップしてJSONのみ出力するか
+        debug: デバッグモードを有効にするか（詳細ログ出力）
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
     print(f"オーディオタグ使用: {use_audio_tags}")
     print(f"JSONのみ: {json_only}")
+    print(f"デバッグモード: {debug}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -160,7 +167,7 @@ def process_srt_file(
     if use_audio_tags:
         try:
             llm_client = LLMClient()
-            audio_tag_processor = AudioTagProcessor(llm_client)
+            audio_tag_processor = AudioTagProcessor(llm_client, debug=debug)
             print("[LLM] オーディオタグプロセッサ初期化完了")
         except ValueError as e:
             print(f"[LLM] オーディオタグ無効: {e}")
@@ -242,8 +249,21 @@ def main() -> None:
         action="store_true",
         help="TTSをスキップしてオーディオタグ付きJSONのみを出力する",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="デバッグモードを有効にする（LLMコンテキストと応答を詳細出力）",
+    )
 
     args = parser.parse_args()
+
+    # デバッグモードでロギングを設定
+    if args.debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
 
     input_path = Path(args.input)
     if not input_path.exists():
@@ -261,6 +281,7 @@ def main() -> None:
         output_path,
         use_audio_tags=not args.no_tags,
         json_only=args.json_only,
+        debug=args.debug,
     )
 
 
