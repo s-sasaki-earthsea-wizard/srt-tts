@@ -72,8 +72,9 @@ def process_srt_file(
     use_audio_tags: bool = True,
     json_only: bool = False,
     debug: bool = False,
-    speed_threshold: float = 0.85,
+    speed_threshold: float = 1.0,
     max_shorten_retries: int = 2,
+    margin_ms: int = 100,
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -86,6 +87,7 @@ def process_srt_file(
         debug: デバッグモードを有効にするか（詳細ログ出力）
         speed_threshold: 速度調整の閾値（これ以下で再意訳）
         max_shorten_retries: 再意訳の最大リトライ回数
+        margin_ms: エントリー間の最低マージン（ミリ秒）
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
@@ -94,6 +96,7 @@ def process_srt_file(
     print(f"デバッグモード: {debug}")
     print(f"速度調整閾値: {speed_threshold}")
     print(f"最大リトライ回数: {max_shorten_retries}")
+    print(f"エントリー間マージン: {margin_ms}ms")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -124,6 +127,7 @@ def process_srt_file(
         audio_tag_processor=audio_tag_processor,
         speed_threshold=speed_threshold,
         max_shorten_retries=max_shorten_retries,
+        margin_ms=margin_ms,
     )
 
     # 処理
@@ -136,12 +140,16 @@ def process_srt_file(
             print(f"処理中: [{subtitle.index}] {subtitle.text[:30]}...")
             prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
             next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
+            prev_entry_end_ms = subtitles[i - 1].end_ms if i > 0 else None
+            next_entry_start_ms = subtitles[i + 1].start_ms if i < len(subtitles) - 1 else None
 
             _, _, tagged_text = subtitle_processor.process(
                 subtitle,
                 temp_dir=None,
                 prev_texts=prev_texts if prev_texts else None,
                 next_texts=next_texts if next_texts else None,
+                prev_entry_end_ms=prev_entry_end_ms,
+                next_entry_start_ms=next_entry_start_ms,
             )
             tagged_texts.append(tagged_text)
     else:
@@ -153,12 +161,16 @@ def process_srt_file(
                 print(f"処理中: [{subtitle.index}] {subtitle.text[:30]}...")
                 prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
                 next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
+                prev_entry_end_ms = subtitles[i - 1].end_ms if i > 0 else None
+                next_entry_start_ms = subtitles[i + 1].start_ms if i < len(subtitles) - 1 else None
 
                 start_ms, audio_path, tagged_text = subtitle_processor.process(
                     subtitle,
                     temp_dir=temp_path,
                     prev_texts=prev_texts if prev_texts else None,
                     next_texts=next_texts if next_texts else None,
+                    prev_entry_end_ms=prev_entry_end_ms,
+                    next_entry_start_ms=next_entry_start_ms,
                 )
                 if audio_path:
                     audio_segments.append((start_ms, audio_path))
@@ -204,14 +216,20 @@ def main() -> None:
     parser.add_argument(
         "--speed-threshold",
         type=float,
-        default=0.85,
-        help="速度調整の閾値（デフォルト: 0.85）。これ以下で再意訳を試行",
+        default=1.0,
+        help="速度調整の閾値（デフォルト: 1.0）。これ以下で再意訳を試行",
     )
     parser.add_argument(
         "--max-shorten-retries",
         type=int,
-        default=1,
-        help="再意訳の最大リトライ回数（デフォルト: 1）",
+        default=2,
+        help="再意訳の最大リトライ回数（デフォルト: 2）",
+    )
+    parser.add_argument(
+        "--margin-ms",
+        type=int,
+        default=100,
+        help="エントリー間の最低マージン（ミリ秒、デフォルト: 100）",
     )
 
     args = parser.parse_args()
@@ -243,6 +261,7 @@ def main() -> None:
         debug=args.debug,
         speed_threshold=args.speed_threshold,
         max_shorten_retries=args.max_shorten_retries,
+        margin_ms=args.margin_ms,
     )
 
 
