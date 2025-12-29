@@ -1,13 +1,12 @@
 .PHONY: build run clean help
+.DEFAULT_GOAL := help
 
 IMAGE_NAME := srt-tts
 
-## Dockerイメージをビルド
-build:
+build: ## Dockerイメージをビルド
 	docker build -t $(IMAGE_NAME) .
 
-## SRTファイルを音声化（使用例: make run SRT=srt/example.srt [JSON_ONLY=1]）
-run:
+run: ## SRTファイルを音声化 (SRT=<path> [JSON_ONLY=1])
 ifndef SRT
 	$(error SRT is required. Usage: make run SRT=srt/example.srt)
 endif
@@ -17,11 +16,20 @@ else
 	docker compose run --rm srt-tts python -m src.app /app/$(SRT)
 endif
 
-## Dockerイメージを削除
-clean:
+clean: ## Dockerイメージを削除
 	docker rmi $(IMAGE_NAME) || true
 
-## ヘルプを表示
-help:
+help: ## ヘルプを表示
+	@echo "SRT-TTS - SRTファイルをElevenLabs APIで音声化"
+	@echo ""
 	@echo "使用可能なコマンド:"
-	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/## /  /'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "引数:"
+	@echo "  SRT          入力SRTファイルのパス (例: srt/example.srt)"
+	@echo "  JSON_ONLY    1を指定するとTTSをスキップしてJSONのみ出力"
+	@echo ""
+	@echo "使用例:"
+	@echo "  make build"
+	@echo "  make run SRT=srt/example.srt"
+	@echo "  make run SRT=srt/example.srt JSON_ONLY=1"
