@@ -1,8 +1,33 @@
-# Project Name
+# SRT-TTS
 
 ## プロジェクト概要
 
-プロジェクトの概要を記載します。
+SRTファイルをElevenLabs APIで音声化するツール。LLMを使用してオーディオタグを自動付与し、より表現豊かな音声を生成する。
+
+### 技術スタック
+
+- Python 3.11+
+- Docker / Docker Compose
+- ElevenLabs TTS API (v3)
+- OpenAI互換 LLM API
+- pydub（音声処理）
+- pysrt（SRTパース）
+
+### アーキテクチャ
+
+```text
+SRTファイル
+    ↓
+[SRTパーサー] タイムスタンプ・テキスト抽出
+    ↓
+[LLM] オーディオタグ付与（前後2エントリーのコンテキスト参照）
+    ↓
+[ElevenLabs TTS] 音声合成
+    ↓
+[音声処理] 速度調整（タイムスタンプに収まるように）
+    ↓
+[音声結合] 最終MP3ファイル生成
+```
 
 ## 言語設定
 
@@ -33,7 +58,6 @@
 1. **CLAUDE.md**: プロジェクト全体状況、Phase完了記録、技術仕様
 2. **README.md**: ユーザー向け機能概要、実装状況、使用方法
 3. **Makefile**: コマンドヘルプテキスト（## コメント）の更新
-4. **makefiles/**: コマンドヘルプテキスト（## コメント）の更新
 
 ### コミットメッセージ規約
 
@@ -65,3 +89,18 @@
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
+
+## 実装状況
+
+### 完了した機能
+
+- [x] SRTパーサー（pysrt使用）
+- [x] ElevenLabs TTSクライアント
+- [x] 音声速度調整（pydub使用）
+- [x] 音声結合処理
+- [x] LLMクライアント（OpenAI互換）
+- [x] オーディオタグ自動付与
+- [x] コンテキストウィンドウ（前後2エントリー参照）
+- [x] タグ付きテキストのJSON出力
+- [x] JSON-onlyモード（開発用）
+- [x] Dockerボリュームマウント（開発用）
