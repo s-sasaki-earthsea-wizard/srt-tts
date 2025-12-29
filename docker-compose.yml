@@ -1,0 +1,8 @@
+services:
+  srt-tts:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./srt:/app/srt
+      - ./output:/app/output
