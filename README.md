@@ -1,55 +1,90 @@
-# プロジェクト名
-プロジェクト名を書いてください。
+# SRT-TTS
+
+SRTファイルをElevenLabs APIで音声化するツール
 
 ## 概要
-プロジェクトの概要を書いてください。
+
+SRT字幕ファイルを読み込み、タイムスタンプに基づいて音声ファイルを生成します。
+LLMを使用してオーディオタグ（表現タグ）を自動付与し、より自然で表現豊かな音声を生成できます。
+
+### 主な機能
+
+- SRTファイルのパースとタイムスタンプ抽出
+- ElevenLabs TTS APIによる音声合成
+- LLMによるオーディオタグの自動付与（ElevenLabs v3対応）
+- 音声長がタイムスタンプを超える場合の速度調整
+- タグ付きテキストのJSON出力
 
 ## 開発環境
-開発環境について書きます。以下が例です。
 
-- OS: Ubuntu-18.04 (AWS EC2 instance xrdp01-gui)
-- Python: 3.8.6
+- Docker / Docker Compose
+- Python 3.11+
 
-## インストール方法
-インストール方法を書いてください。
-以下のようなコマンドを書くなどすると手順がわかりやすくなるでしょう。
+## セットアップ
 
+1. リポジトリをクローン
+
+2. 環境変数を設定
+
+```bash
+cp env.example .env
 ```
-make install
+
+`.env`ファイルを編集して以下のAPIキーを設定：
+
+- `ELEVENLABS_API_KEY`: ElevenLabs APIキー
+- `ELEVENLABS_VOICE_ID`: 使用する音声ID
+- `LLM_API_KEY`: LLM APIキー（オーディオタグ用）
+- `LLM_BASE_URL`: LLM APIのベースURL
+- `LLM_MODEL`: 使用するLLMモデル
+
+3. Dockerイメージをビルド
+
+```bash
+make build
 ```
 
 ## 使い方
-実行方法やチュートリアルを書いてください。
-必要に応じてスクリーンショットや動画を使ってください。
 
-## その他
-必要なことがあれば書いてください。
+### SRTファイルを音声化
 
-_____
-
-# Project name
-Write the name of the project.
-
-## Overview
-Write an overview of the project.
-
-## Development environment
-Write about the development environment. The following is an example.
-
-- OS: Ubuntu-18.04 (AWS EC2 instance xrdp01-gui)
-- Python: 3.8.6
-
-## Installation
-Write down the installation procedure.
-Commands will be useful to make clear as:
-
-```
-make install
+```bash
+make run SRT=srt/example.srt
 ```
 
-## Usage
-Write a running procedure or tutorial.
-Use screenshots and videos if necessary.
+出力：
 
-## Others
-Anything else, please write here.
+- `output/example.mp3` - 音声ファイル
+- `output/example.json` - オーディオタグ付きテキスト
+
+### オーディオタグ付きJSONのみ出力（TTS無し）
+
+開発・デバッグ用にTTSをスキップしてJSONのみを出力：
+
+```bash
+make run SRT=srt/example.srt JSON_ONLY=1
+```
+
+### その他のコマンド
+
+```bash
+make help    # ヘルプを表示
+make clean   # Dockerイメージを削除
+```
+
+## プロジェクト構成
+
+```
+srt-tts/
+├── src/
+│   ├── app.py              # メインアプリケーション
+│   ├── parsers/            # SRTパーサー
+│   ├── clients/            # API クライアント（TTS, LLM）
+│   ├── audio/              # 音声処理
+│   └── processors/         # オーディオタグ処理
+├── srt/                    # 入力SRTファイル
+├── output/                 # 出力ファイル
+├── Dockerfile
+├── docker-compose.yml
+└── Makefile
+```
