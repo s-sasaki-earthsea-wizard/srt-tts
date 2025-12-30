@@ -4,3 +4,16 @@
 # .vscode
 .vscode
 
+# SRT files
+*.srt
+
+# __pycache__
+__pycache__/
+*.pyc
+
+# .env
+.env
+
+# output
+output/*
+!output/.gitkeep
