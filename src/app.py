@@ -11,7 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .audio import combine_audio_segments
-from .clients import LLMClient, TTSClient
+from .clients import GTTSEstimator, LLMClient, TTSClient
 from .parsers import Subtitle, parse_srt
 from .processors import AudioTagProcessor, SubtitleProcessor
 
@@ -75,6 +75,7 @@ def process_srt_file(
     speed_threshold: float = 1.0,
     max_shorten_retries: int = 2,
     margin_ms: int = 100,
+    estimation_ratio: float | None = 0.9,
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -88,6 +89,7 @@ def process_srt_file(
         speed_threshold: 速度調整の閾値（これ以下で再意訳）
         max_shorten_retries: 再意訳の最大リトライ回数
         margin_ms: エントリー間の最低マージン（ミリ秒）
+        estimation_ratio: gTTS事前見積もりの補正係数（Noneで無効化）
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
@@ -97,6 +99,7 @@ def process_srt_file(
     print(f"速度調整閾値: {speed_threshold}")
     print(f"最大リトライ回数: {max_shorten_retries}")
     print(f"エントリー間マージン: {margin_ms}ms")
+    print(f"gTTS事前見積もり: {f'有効 (補正係数: {estimation_ratio})' if estimation_ratio else '無効'}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -121,6 +124,12 @@ def process_srt_file(
             print(f"[LLM] 初期化エラー: {e}")
             traceback.print_exc()
 
+    # gTTS事前見積もりクライアントを初期化
+    gtts_estimator = None
+    if estimation_ratio is not None and not json_only:
+        gtts_estimator = GTTSEstimator(estimation_ratio=estimation_ratio)
+        print(f"[gTTS] 事前見積もりクライアント初期化完了 (補正係数: {estimation_ratio})")
+
     # 字幕プロセッサを初期化
     subtitle_processor = SubtitleProcessor(
         tts_client=tts_client,
@@ -128,6 +137,7 @@ def process_srt_file(
         speed_threshold=speed_threshold,
         max_shorten_retries=max_shorten_retries,
         margin_ms=margin_ms,
+        gtts_estimator=gtts_estimator,
     )
 
     # 処理
@@ -231,6 +241,12 @@ def main() -> None:
         default=100,
         help="エントリー間の最低マージン（ミリ秒、デフォルト: 100）",
     )
+    parser.add_argument(
+        "--estimation-ratio",
+        type=float,
+        default=0.9,
+        help="gTTS事前見積もりの補正係数（デフォルト: 0.9）。0以下で無効化",
+    )
 
     args = parser.parse_args()
 
@@ -253,6 +269,9 @@ def main() -> None:
         suffix = ".json" if args.json_only else ".mp3"
         output_path = Path("output") / f"{input_path.stem}{suffix}"
 
+    # estimation_ratioが0以下の場合は無効化
+    estimation_ratio = args.estimation_ratio if args.estimation_ratio > 0 else None
+
     process_srt_file(
         input_path,
         output_path,
@@ -262,6 +281,7 @@ def main() -> None:
         speed_threshold=args.speed_threshold,
         max_shorten_retries=args.max_shorten_retries,
         margin_ms=args.margin_ms,
+        estimation_ratio=estimation_ratio,
     )
 
 
