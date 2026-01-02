@@ -88,7 +88,8 @@ def process_srt_file(
     gtts_only: bool = False,
     debug: bool = False,
     speed_threshold: float = 1.0,
-    max_shorten_retries: int = 2,
+    gtts_shorten_retries: int = 8,
+    el_shorten_retries: int = 2,
     margin_ms: int = 100,
     estimation_ratio: float | None = 0.9,
     lang: str = "ja",
@@ -104,7 +105,8 @@ def process_srt_file(
         gtts_only: gTTSのみで音声生成（ElevenLabsを使用しない）
         debug: デバッグモードを有効にするか（詳細ログ出力）
         speed_threshold: 速度調整の閾値（これ以下で再意訳）
-        max_shorten_retries: 再意訳の最大リトライ回数
+        gtts_shorten_retries: gTTS事前見積もりでの再意訳の最大リトライ回数
+        el_shorten_retries: ElevenLabs生成後の再意訳の最大リトライ回数
         margin_ms: エントリー間の最低マージン（ミリ秒）
         estimation_ratio: gTTS事前見積もりの補正係数（Noneで無効化）
         lang: gTTSの言語コード（デフォルト: ja）
@@ -116,7 +118,8 @@ def process_srt_file(
     print(f"gTTSのみ: {gtts_only}")
     print(f"デバッグモード: {debug}")
     print(f"速度調整閾値: {speed_threshold}")
-    print(f"最大リトライ回数: {max_shorten_retries}")
+    print(f"gTTS短縮リトライ回数: {gtts_shorten_retries}"
+          f", ElevenLabs短縮リトライ回数: {el_shorten_retries}")
     print(f"エントリー間マージン: {margin_ms}ms")
     print(f"gTTS事前見積もり: {f'有効 (補正係数: {estimation_ratio})' if estimation_ratio else '無効'}")
     print(f"gTTS言語: {lang}")
@@ -159,7 +162,8 @@ def process_srt_file(
         tts_client=tts_client,
         audio_tag_processor=audio_tag_processor,
         speed_threshold=speed_threshold,
-        max_shorten_retries=max_shorten_retries,
+        gtts_shorten_retries=gtts_shorten_retries,
+        el_shorten_retries=el_shorten_retries,
         margin_ms=margin_ms,
         gtts_estimator=gtts_estimator,
         lang=lang,
@@ -312,10 +316,16 @@ def main() -> None:
         help="速度調整の閾値（デフォルト: 1.0）。これ以下で再意訳を試行",
     )
     parser.add_argument(
-        "--max-shorten-retries",
+        "--gtts-shorten-retries",
+        type=int,
+        default=8,
+        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 8）",
+    )
+    parser.add_argument(
+        "--el-shorten-retries",
         type=int,
         default=2,
-        help="再意訳の最大リトライ回数（デフォルト: 2）",
+        help="ElevenLabs生成後の再意訳リトライ回数（デフォルト: 2）",
     )
     parser.add_argument(
         "--margin-ms",
@@ -373,7 +383,8 @@ def main() -> None:
         gtts_only=args.gtts_only,
         debug=args.debug,
         speed_threshold=args.speed_threshold,
-        max_shorten_retries=args.max_shorten_retries,
+        gtts_shorten_retries=args.gtts_shorten_retries,
+        el_shorten_retries=args.el_shorten_retries,
         margin_ms=args.margin_ms,
         estimation_ratio=estimation_ratio,
         lang=args.lang,

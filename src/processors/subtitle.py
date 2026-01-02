@@ -17,7 +17,8 @@ class SubtitleProcessor:
         tts_client: TTSClient | None,
         audio_tag_processor: AudioTagProcessor | None,
         speed_threshold: float = 1.0,
-        max_shorten_retries: int = 2,
+        gtts_shorten_retries: int = 8,
+        el_shorten_retries: int = 2,
         margin_ms: int = 100,
         gtts_estimator: GTTSEstimator | None = None,
         lang: str = "ja",
@@ -27,7 +28,8 @@ class SubtitleProcessor:
             tts_client: TTSクライアント（Noneの場合はTTSをスキップ）
             audio_tag_processor: オーディオタグプロセッサ（Noneの場合はタグ付けをスキップ）
             speed_threshold: 速度調整の閾値（これ以下で再意訳）
-            max_shorten_retries: 再意訳の最大リトライ回数
+            gtts_shorten_retries: gTTS事前見積もりでの再意訳の最大リトライ回数
+            el_shorten_retries: ElevenLabs生成後の再意訳の最大リトライ回数
             margin_ms: エントリー間の最低マージン（ミリ秒）
             gtts_estimator: gTTSによる事前見積もりクライアント（Noneの場合はスキップ）
             lang: gTTSの言語コード（デフォルト: ja）
@@ -35,7 +37,8 @@ class SubtitleProcessor:
         self.tts_client = tts_client
         self.audio_tag_processor = audio_tag_processor
         self.speed_threshold = speed_threshold
-        self.max_shorten_retries = max_shorten_retries
+        self.gtts_shorten_retries = gtts_shorten_retries
+        self.el_shorten_retries = el_shorten_retries
         self.margin_ms = margin_ms
         self.gtts_estimator = gtts_estimator
         self.lang = lang
@@ -137,7 +140,7 @@ class SubtitleProcessor:
             next_texts=next_texts,
         )
 
-        for retry in range(self.max_shorten_retries + 1 - pre_shorten_count):
+        for retry in range(self.el_shorten_retries + 1):
             # 音声を生成
             raw_audio_path = temp_dir / f"raw_{subtitle.index}.mp3"
             self.tts_client.synthesize(text, raw_audio_path)
@@ -164,7 +167,7 @@ class SubtitleProcessor:
                 )
 
             # 閾値を超えた場合
-            if retry == self.max_shorten_retries:
+            if retry == self.el_shorten_retries:
                 # 最大リトライ回数到達: 警告を出して速度調整で続行
                 print(
                     f"    [警告] 最大リトライ回数到達 "
@@ -180,6 +183,7 @@ class SubtitleProcessor:
                 text=text,
                 speed_ratio=speed_ratio,
                 retry=retry,
+                max_retries=self.el_shorten_retries,
                 subtitle=subtitle,
                 prev_texts=prev_texts,
                 next_texts=next_texts,
@@ -301,6 +305,7 @@ class SubtitleProcessor:
         text: str,
         speed_ratio: float,
         retry: int,
+        max_retries: int,
         subtitle: Subtitle,
         prev_texts: list[str] | None,
         next_texts: list[str] | None,
@@ -313,7 +318,7 @@ class SubtitleProcessor:
         target_char_ratio = speed_ratio * 0.85
         print(
             f"    [再意訳] 速度比 {speed_ratio:.2f} < 閾値 {self.speed_threshold} "
-            f"-> 目標 {target_char_ratio:.0%} に短縮 (リトライ {retry + 1}/{self.max_shorten_retries})"
+            f"-> 目標 {target_char_ratio:.0%} に短縮 (リトライ {retry + 1}/{max_retries})"
         )
         print(f"    元テキスト: {text}")
 
@@ -362,7 +367,7 @@ class SubtitleProcessor:
 
         shorten_count = 0
 
-        for retry in range(self.max_shorten_retries):
+        for retry in range(self.gtts_shorten_retries):
             try:
                 estimated_duration = self.gtts_estimator.estimate_duration_ms(text, lang=self.lang)
             except Exception as e:
@@ -394,6 +399,7 @@ class SubtitleProcessor:
                 text=text,
                 speed_ratio=speed_ratio,
                 retry=retry,
+                max_retries=self.gtts_shorten_retries,
                 subtitle=subtitle,
                 prev_texts=prev_texts,
                 next_texts=next_texts,
