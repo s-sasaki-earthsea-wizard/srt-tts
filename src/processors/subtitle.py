@@ -20,6 +20,7 @@ class SubtitleProcessor:
         max_shorten_retries: int = 2,
         margin_ms: int = 100,
         gtts_estimator: GTTSEstimator | None = None,
+        lang: str = "ja",
     ):
         """
         Args:
@@ -29,6 +30,7 @@ class SubtitleProcessor:
             max_shorten_retries: 再意訳の最大リトライ回数
             margin_ms: エントリー間の最低マージン（ミリ秒）
             gtts_estimator: gTTSによる事前見積もりクライアント（Noneの場合はスキップ）
+            lang: gTTSの言語コード（デフォルト: ja）
         """
         self.tts_client = tts_client
         self.audio_tag_processor = audio_tag_processor
@@ -36,6 +38,7 @@ class SubtitleProcessor:
         self.max_shorten_retries = max_shorten_retries
         self.margin_ms = margin_ms
         self.gtts_estimator = gtts_estimator
+        self.lang = lang
 
     def process(
         self,
@@ -361,7 +364,7 @@ class SubtitleProcessor:
 
         for retry in range(self.max_shorten_retries):
             try:
-                estimated_duration = self.gtts_estimator.estimate_duration_ms(text)
+                estimated_duration = self.gtts_estimator.estimate_duration_ms(text, lang=self.lang)
             except Exception as e:
                 print(f"    [gTTS見積もりエラー] {e}")
                 break
