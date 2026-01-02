@@ -214,6 +214,16 @@ def process_srt_file(
                     except Exception as e:
                         print(f"    [タグ付与エラー] {e}")
 
+                # 時間枠を計算して事前短縮
+                available_ms = subtitle.end_ms - subtitle.start_ms
+                text, _ = subtitle_processor._pre_shorten_with_gtts(
+                    text=text,
+                    available_total=available_ms,
+                    subtitle=subtitle,
+                    prev_texts=prev_texts if prev_texts else None,
+                    next_texts=next_texts if next_texts else None,
+                )
+
                 tagged_texts.append(text)
 
                 # gTTSで音声を生成
