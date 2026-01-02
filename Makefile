@@ -32,6 +32,7 @@ help: ## ヘルプを表示
 	@echo ""
 	@echo "追加オプション (ARGSで指定):"
 	@echo "  --gtts-only                 gTTSのみで音声生成 (ElevenLabsを使用しない)"
+	@echo "  --lang <code>               gTTSの言語コード (デフォルト: ja、例: en, ko, zh-CN)"
 	@echo "  --estimation-ratio <float>  gTTS事前見積もりの補正係数 (デフォルト: 0.9、0以下で無効)"
 	@echo "  --speed-threshold <float>   速度調整の閾値 (デフォルト: 1.0)"
 	@echo "  --max-shorten-retries <int> 再意訳の最大リトライ回数 (デフォルト: 2)"

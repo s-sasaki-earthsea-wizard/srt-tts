@@ -91,6 +91,7 @@ def process_srt_file(
     max_shorten_retries: int = 2,
     margin_ms: int = 100,
     estimation_ratio: float | None = 0.9,
+    lang: str = "ja",
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -106,6 +107,7 @@ def process_srt_file(
         max_shorten_retries: 再意訳の最大リトライ回数
         margin_ms: エントリー間の最低マージン（ミリ秒）
         estimation_ratio: gTTS事前見積もりの補正係数（Noneで無効化）
+        lang: gTTSの言語コード（デフォルト: ja）
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
@@ -117,6 +119,7 @@ def process_srt_file(
     print(f"最大リトライ回数: {max_shorten_retries}")
     print(f"エントリー間マージン: {margin_ms}ms")
     print(f"gTTS事前見積もり: {f'有効 (補正係数: {estimation_ratio})' if estimation_ratio else '無効'}")
+    print(f"gTTS言語: {lang}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -159,6 +162,7 @@ def process_srt_file(
         max_shorten_retries=max_shorten_retries,
         margin_ms=margin_ms,
         gtts_estimator=gtts_estimator,
+        lang=lang,
     )
 
     # 処理
@@ -214,7 +218,7 @@ def process_srt_file(
 
                 # gTTSで音声を生成
                 audio_path = temp_path / f"gtts_{subtitle.index}.mp3"
-                _, duration_ms = gtts_estimator.synthesize(text, audio_path)
+                _, duration_ms = gtts_estimator.synthesize(text, audio_path, lang=lang)
                 durations_ms.append(duration_ms)
                 audio_segments.append((subtitle.start_ms, audio_path))
 
@@ -320,6 +324,12 @@ def main() -> None:
         action="store_true",
         help="gTTSのみで音声生成（ElevenLabsを使用しない）",
     )
+    parser.add_argument(
+        "--lang",
+        type=str,
+        default="ja",
+        help="gTTSの言語コード（デフォルト: ja）。例: en, ja, ko, zh-CN",
+    )
 
     args = parser.parse_args()
 
@@ -356,6 +366,7 @@ def main() -> None:
         max_shorten_retries=args.max_shorten_retries,
         margin_ms=args.margin_ms,
         estimation_ratio=estimation_ratio,
+        lang=args.lang,
     )
 
 
