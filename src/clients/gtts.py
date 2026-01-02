@@ -86,3 +86,36 @@ class GTTSEstimator:
         """
         estimated = self.estimate_duration_ms(text, lang)
         return estimated <= available_ms
+
+    def synthesize(self, text: str, output_path: str | Path, lang: str = "ja") -> tuple[Path, int]:
+        """
+        gTTSでテキストを音声に変換してファイルに保存する
+
+        Args:
+            text: 変換するテキスト（オーディオタグ含む可）
+            output_path: 出力ファイルパス
+            lang: 言語コード（デフォルト: ja）
+
+        Returns:
+            (保存されたファイルのパス, 音声長ミリ秒)のタプル
+        """
+        output_path = Path(output_path)
+
+        # オーディオタグを除去
+        plain_text = self._strip_audio_tags(text)
+
+        if not plain_text:
+            # 空のテキストの場合は空のファイルを作成
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.touch()
+            return (output_path, 0)
+
+        # 音声を生成
+        tts = gTTS(text=plain_text, lang=lang)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        tts.save(str(output_path))
+
+        # 音声長を取得
+        duration_ms = get_audio_duration_ms(output_path)
+
+        return (output_path, duration_ms)
