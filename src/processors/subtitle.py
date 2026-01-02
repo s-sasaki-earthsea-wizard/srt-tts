@@ -4,7 +4,7 @@ import traceback
 from pathlib import Path
 
 from ..audio import adjust_audio_speed, get_audio_duration_ms
-from ..clients import TTSClient
+from ..clients import GTTSEstimator, TTSClient
 from ..parsers import Subtitle
 from .audio_tag import AudioTagProcessor
 
@@ -19,6 +19,8 @@ class SubtitleProcessor:
         speed_threshold: float = 1.0,
         max_shorten_retries: int = 2,
         margin_ms: int = 100,
+        gtts_estimator: GTTSEstimator | None = None,
+        lang: str = "ja",
     ):
         """
         Args:
@@ -27,12 +29,16 @@ class SubtitleProcessor:
             speed_threshold: 速度調整の閾値（これ以下で再意訳）
             max_shorten_retries: 再意訳の最大リトライ回数
             margin_ms: エントリー間の最低マージン（ミリ秒）
+            gtts_estimator: gTTSによる事前見積もりクライアント（Noneの場合はスキップ）
+            lang: gTTSの言語コード（デフォルト: ja）
         """
         self.tts_client = tts_client
         self.audio_tag_processor = audio_tag_processor
         self.speed_threshold = speed_threshold
         self.max_shorten_retries = max_shorten_retries
         self.margin_ms = margin_ms
+        self.gtts_estimator = gtts_estimator
+        self.lang = lang
 
     def process(
         self,
@@ -122,7 +128,16 @@ class SubtitleProcessor:
         )
         available_total = available_end - available_start
 
-        for retry in range(self.max_shorten_retries + 1):
+        # gTTSによる事前見積もりで短縮が必要か判定
+        text, pre_shorten_count = self._pre_shorten_with_gtts(
+            text=text,
+            available_total=available_total,
+            subtitle=subtitle,
+            prev_texts=prev_texts,
+            next_texts=next_texts,
+        )
+
+        for retry in range(self.max_shorten_retries + 1 - pre_shorten_count):
             # 音声を生成
             raw_audio_path = temp_dir / f"raw_{subtitle.index}.mp3"
             self.tts_client.synthesize(text, raw_audio_path)
@@ -316,3 +331,78 @@ class SubtitleProcessor:
             print(f"    [再意訳エラー] {e}")
             traceback.print_exc()
             return None
+
+    def _pre_shorten_with_gtts(
+        self,
+        text: str,
+        available_total: int,
+        subtitle: Subtitle,
+        prev_texts: list[str] | None,
+        next_texts: list[str] | None,
+    ) -> tuple[str, int]:
+        """
+        gTTSで事前見積もりを行い、必要なら短縮を行う
+
+        ElevenLabsを呼ぶ前にgTTS（無料）で音声長を見積もり、
+        時間内に収まらない場合は先に短縮を行うことで、
+        ElevenLabsのクレジット消費を抑える。
+
+        Args:
+            text: 処理対象のテキスト
+            available_total: 利用可能な時間（ミリ秒）
+            subtitle: 字幕データ
+            prev_texts: 前のエントリーのテキストリスト
+            next_texts: 次のエントリーのテキストリスト
+
+        Returns:
+            (処理後テキスト, 事前短縮した回数)のタプル
+        """
+        if not self.gtts_estimator:
+            return (text, 0)
+
+        shorten_count = 0
+
+        for retry in range(self.max_shorten_retries):
+            try:
+                estimated_duration = self.gtts_estimator.estimate_duration_ms(text, lang=self.lang)
+            except Exception as e:
+                print(f"    [gTTS見積もりエラー] {e}")
+                break
+
+            if estimated_duration <= available_total:
+                # 時間内に収まる見込み
+                if shorten_count > 0:
+                    print(f"    [gTTS見積もり] 短縮後OK: {estimated_duration}ms <= {available_total}ms")
+                return (text, shorten_count)
+
+            # 時間内に収まらない
+            speed_ratio = available_total / estimated_duration
+            print(
+                f"    [gTTS見積もり] 時間超過: {estimated_duration}ms > {available_total}ms "
+                f"(速度比: {speed_ratio:.2f})"
+            )
+
+            if speed_ratio >= self.speed_threshold:
+                # 速度調整で対応可能な範囲
+                return (text, shorten_count)
+
+            # 事前短縮を実行
+            if not self.audio_tag_processor:
+                break
+
+            shortened = self._shorten_text(
+                text=text,
+                speed_ratio=speed_ratio,
+                retry=retry,
+                subtitle=subtitle,
+                prev_texts=prev_texts,
+                next_texts=next_texts,
+            )
+
+            if shortened is None:
+                break
+
+            text = shortened
+            shorten_count += 1
+
+        return (text, shorten_count)
