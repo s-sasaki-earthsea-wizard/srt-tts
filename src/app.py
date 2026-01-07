@@ -202,6 +202,8 @@ def process_srt_file(
                 print(f"処理中: [{subtitle.index}] {subtitle.text[:30]}...")
                 prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
                 next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
+                prev_entry_end_ms = subtitles[i - 1].end_ms if i > 0 else None
+                next_entry_start_ms = subtitles[i + 1].start_ms if i < len(subtitles) - 1 else None
 
                 # オーディオタグを付与
                 text = subtitle.text
@@ -218,11 +220,14 @@ def process_srt_file(
                     except Exception as e:
                         print(f"    [タグ付与エラー] {e}")
 
-                # 時間枠を計算して事前短縮
-                available_ms = subtitle.end_ms - subtitle.start_ms
+                # 時間枠を計算して事前短縮（前後エントリーとのバッファを考慮）
+                available_start, available_end = subtitle_processor._calculate_available_time_window(
+                    subtitle, prev_entry_end_ms, next_entry_start_ms
+                )
+                available_total = available_end - available_start
                 text, _ = subtitle_processor._pre_shorten_with_gtts(
                     text=text,
-                    available_total=available_ms,
+                    available_total=available_total,
                     subtitle=subtitle,
                     prev_texts=prev_texts if prev_texts else None,
                     next_texts=next_texts if next_texts else None,
