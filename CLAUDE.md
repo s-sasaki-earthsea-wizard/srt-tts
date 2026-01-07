@@ -10,6 +10,7 @@ SRTファイルをElevenLabs APIで音声化するツール。LLMを使用して
 - Docker / Docker Compose
 - ElevenLabs TTS API (v3)
 - OpenAI互換 LLM API
+- gTTS（Google Text-to-Speech）
 - pydub（音声処理）
 - pysrt（SRTパース）
 
@@ -22,9 +23,11 @@ SRTファイル
     ↓
 [LLM] オーディオタグ付与（前後2エントリーのコンテキスト参照）
     ↓
+[gTTS] 事前見積もり → 時間超過なら最大8回まで短縮を試行（無料）
+    ↓
 [ElevenLabs TTS] 音声合成
     ↓
-[音声処理] 速度調整（タイムスタンプに収まるように）
+[音声処理] 時間超過なら最大2回まで短縮を試行 → それでも超過なら速度調整
     ↓
 [音声結合] 最終MP3ファイル生成
 ```
@@ -104,3 +107,24 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - [x] タグ付きテキストのJSON出力
 - [x] JSON-onlyモード（開発用）
 - [x] Dockerボリュームマウント（開発用）
+- [x] gTTSによる事前見積もり（ElevenLabsクレジット節約）
+- [x] gTTS-onlyモード（ElevenLabs不使用での音声生成）
+- [x] 多言語対応（--lang オプション）
+- [x] LLMによるテキスト短縮（時間枠内に収めるための再意訳）
+- [x] 分離されたリトライ上限（gTTS: 8回、ElevenLabs: 2回）
+- [x] 柔軟な音声配置（マージンベースの前後調整）
+
+## CLIオプション
+
+| オプション | デフォルト | 説明 |
+| --- | --- | --- |
+| `--gtts-only` | - | gTTSのみで音声生成 |
+| `--lang` | ja | gTTSの言語コード |
+| `--estimation-ratio` | 0.9 | gTTS事前見積もりの補正係数 |
+| `--gtts-shorten-retries` | 8 | gTTS事前見積もりでの再意訳リトライ回数 |
+| `--el-shorten-retries` | 2 | ElevenLabs生成後の再意訳リトライ回数 |
+| `--speed-threshold` | 1.0 | 速度調整の閾値 |
+| `--margin-ms` | 100 | エントリー間の最低マージン（ミリ秒） |
+| `--no-tags` | - | オーディオタグの付与をスキップ |
+| `--json-only` | - | TTSをスキップしてJSONのみ出力 |
+| `--debug` | - | デバッグモードを有効化 |
