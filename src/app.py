@@ -317,8 +317,8 @@ def main() -> None:
     parser.add_argument(
         "--speed-threshold",
         type=float,
-        default=1.0,
-        help="速度調整の閾値（デフォルト: 1.0）。これ以下で再意訳を試行",
+        default=0.9,
+        help="速度調整の閾値（デフォルト: 0.9）。これ以下で再意訳を試行",
     )
     parser.add_argument(
         "--gtts-shorten-retries",
@@ -341,8 +341,8 @@ def main() -> None:
     parser.add_argument(
         "--estimation-ratio",
         type=float,
-        default=0.9,
-        help="gTTS事前見積もりの補正係数（デフォルト: 0.9）。0以下で無効化",
+        default=1.0,
+        help="gTTS事前見積もりの補正係数（デフォルト: 1.0）。0以下で無効化",
     )
     parser.add_argument(
         "--gtts-only",
