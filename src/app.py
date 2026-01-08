@@ -93,6 +93,7 @@ def process_srt_file(
     margin_ms: int = 100,
     estimation_ratio: float | None = 0.9,
     lang: str = "ja",
+    shorten_ratio: float = 0.95,
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -110,6 +111,7 @@ def process_srt_file(
         margin_ms: エントリー間の最低マージン（ミリ秒）
         estimation_ratio: gTTS事前見積もりの補正係数（Noneで無効化）
         lang: gTTSの言語コード（デフォルト: ja）
+        shorten_ratio: 文字数削減の目標係数（デフォルト: 0.95）
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
@@ -123,6 +125,7 @@ def process_srt_file(
     print(f"エントリー間マージン: {margin_ms}ms")
     print(f"gTTS事前見積もり: {f'有効 (補正係数: {estimation_ratio})' if estimation_ratio else '無効'}")
     print(f"gTTS言語: {lang}")
+    print(f"文字数削減係数: {shorten_ratio}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -167,6 +170,7 @@ def process_srt_file(
         margin_ms=margin_ms,
         gtts_estimator=gtts_estimator,
         lang=lang,
+        shorten_ratio=shorten_ratio,
     )
 
     # 処理
@@ -323,8 +327,8 @@ def main() -> None:
     parser.add_argument(
         "--gtts-shorten-retries",
         type=int,
-        default=8,
-        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 8）",
+        default=4,
+        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 4）",
     )
     parser.add_argument(
         "--el-shorten-retries",
@@ -354,6 +358,12 @@ def main() -> None:
         type=str,
         default="ja",
         help="gTTSの言語コード（デフォルト: ja）。例: en, ja, ko, zh-CN",
+    )
+    parser.add_argument(
+        "--shorten-ratio",
+        type=float,
+        default=0.95,
+        help="文字数削減の目標係数（デフォルト: 0.95）。速度比にこの係数を掛けた値が目標",
     )
 
     args = parser.parse_args()
@@ -393,6 +403,7 @@ def main() -> None:
         margin_ms=args.margin_ms,
         estimation_ratio=estimation_ratio,
         lang=args.lang,
+        shorten_ratio=args.shorten_ratio,
     )
 
 

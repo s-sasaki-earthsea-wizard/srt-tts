@@ -22,6 +22,7 @@ class SubtitleProcessor:
         margin_ms: int = 100,
         gtts_estimator: GTTSEstimator | None = None,
         lang: str = "ja",
+        shorten_ratio: float = 0.95,
     ):
         """
         Args:
@@ -33,6 +34,7 @@ class SubtitleProcessor:
             margin_ms: エントリー間の最低マージン（ミリ秒）
             gtts_estimator: gTTSによる事前見積もりクライアント（Noneの場合はスキップ）
             lang: gTTSの言語コード（デフォルト: ja）
+            shorten_ratio: 文字数削減の目標係数（デフォルト: 0.95）
         """
         self.tts_client = tts_client
         self.audio_tag_processor = audio_tag_processor
@@ -42,6 +44,7 @@ class SubtitleProcessor:
         self.margin_ms = margin_ms
         self.gtts_estimator = gtts_estimator
         self.lang = lang
+        self.shorten_ratio = shorten_ratio
 
     def process(
         self,
@@ -314,8 +317,8 @@ class SubtitleProcessor:
         if not self.audio_tag_processor:
             return None
 
-        # 文字数削減の目標値は速度比の85%
-        target_char_ratio = speed_ratio * 0.85
+        # 文字数削減の目標値は速度比にshorten_ratioを掛けた値
+        target_char_ratio = speed_ratio * self.shorten_ratio
         print(
             f"    [再意訳] 速度比 {speed_ratio:.2f} < 閾値 {self.speed_threshold} "
             f"-> 目標 {target_char_ratio:.0%} に短縮 (リトライ {retry + 1}/{max_retries})"

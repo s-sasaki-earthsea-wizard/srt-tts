@@ -114,14 +114,17 @@ make run SRT=srt/example.srt JSON_ONLY=1
 ### その他のオプション
 
 ```bash
-# 速度調整の閾値を変更（デフォルト: 1.0）
+# 速度調整の閾値を変更（デフォルト: 0.9）
 make run SRT=srt/example.srt ARGS='--speed-threshold 0.8'
 
-# gTTS事前見積もりの補正係数を変更（デフォルト: 0.9）
-make run SRT=srt/example.srt ARGS='--estimation-ratio 0.85'
+# gTTS事前見積もりの補正係数を変更（デフォルト: 1.0）
+make run SRT=srt/example.srt ARGS='--estimation-ratio 0.9'
+
+# 文字数削減の目標係数を変更（デフォルト: 0.95）
+make run SRT=srt/example.srt ARGS='--shorten-ratio 0.9'
 
 # リトライ回数を変更
-make run SRT=srt/example.srt ARGS='--gtts-shorten-retries 10 --el-shorten-retries 3'
+make run SRT=srt/example.srt ARGS='--gtts-shorten-retries 8 --el-shorten-retries 3'
 
 # エントリー間のマージンを変更（デフォルト: 100ms）
 make run SRT=srt/example.srt ARGS='--margin-ms 200'
@@ -143,10 +146,11 @@ make clean   # Dockerイメージを削除
 |-----------|-----------|------|
 | `--gtts-only` | - | gTTSのみで音声生成（ElevenLabsを使用しない） |
 | `--lang` | ja | gTTSの言語コード（例: en, ja, ko, zh-CN, ru, es） |
-| `--estimation-ratio` | 0.9 | gTTS事前見積もりの補正係数（0以下で無効化） |
-| `--gtts-shorten-retries` | 8 | gTTS事前見積もりでの再意訳リトライ回数 |
+| `--estimation-ratio` | 1.0 | gTTS事前見積もりの補正係数（0以下で無効化） |
+| `--gtts-shorten-retries` | 4 | gTTS事前見積もりでの再意訳リトライ回数 |
 | `--el-shorten-retries` | 2 | ElevenLabs生成後の再意訳リトライ回数 |
-| `--speed-threshold` | 1.0 | 速度調整の閾値（これ以下で再意訳を試行） |
+| `--speed-threshold` | 0.9 | 速度調整の閾値（これ以下で再意訳を試行） |
+| `--shorten-ratio` | 0.95 | 文字数削減の目標係数 |
 | `--margin-ms` | 100 | エントリー間の最低マージン（ミリ秒） |
 | `--no-tags` | - | オーディオタグの付与をスキップ |
 | `--json-only` | - | TTSをスキップしてJSONのみ出力 |
@@ -161,7 +165,7 @@ SRTファイル
     ↓
 [LLM] オーディオタグ付与（前後2エントリーのコンテキスト参照）
     ↓
-[gTTS] 事前見積もり → 時間超過なら最大8回まで短縮を試行
+[gTTS] 事前見積もり → 時間超過なら最大4回まで短縮を試行
     ↓
 [ElevenLabs TTS] 音声合成
     ↓
