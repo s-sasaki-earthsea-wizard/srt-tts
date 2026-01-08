@@ -9,6 +9,7 @@ from lingua import Language, LanguageDetectorBuilder
 logger = logging.getLogger(__name__)
 
 # gTTS言語コードからlingua Languageへのマッピング
+# 現在対応している言語のみ（必要に応じて追加）
 LANG_CODE_MAP: dict[str, Language] = {
     "ja": Language.JAPANESE,
     "en": Language.ENGLISH,
@@ -18,28 +19,6 @@ LANG_CODE_MAP: dict[str, Language] = {
     "zh": Language.CHINESE,
     "ru": Language.RUSSIAN,
     "es": Language.SPANISH,
-    "fr": Language.FRENCH,
-    "de": Language.GERMAN,
-    "it": Language.ITALIAN,
-    "pt": Language.PORTUGUESE,
-    "ar": Language.ARABIC,
-    "hi": Language.HINDI,
-    "th": Language.THAI,
-    "vi": Language.VIETNAMESE,
-    "id": Language.INDONESIAN,
-    "nl": Language.DUTCH,
-    "pl": Language.POLISH,
-    "tr": Language.TURKISH,
-    "uk": Language.UKRAINIAN,
-    "cs": Language.CZECH,
-    "el": Language.GREEK,
-    "he": Language.HEBREW,
-    "sv": Language.SWEDISH,
-    "da": Language.DANISH,
-    "fi": Language.FINNISH,
-    "no": Language.NORWEGIAN,
-    "hu": Language.HUNGARIAN,
-    "ro": Language.ROMANIAN,
 }
 
 

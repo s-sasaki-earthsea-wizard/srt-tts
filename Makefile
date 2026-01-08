@@ -1,10 +1,13 @@
-.PHONY: build run clean help
+.PHONY: build rebuild run clean help
 .DEFAULT_GOAL := help
 
 IMAGE_NAME := srt-tts
 
 build: ## Dockerイメージをビルド
-	docker build -t $(IMAGE_NAME) .
+	docker compose build
+
+rebuild: ## Dockerイメージをキャッシュなしで再ビルド
+	docker compose build --no-cache
 
 run: ## SRTファイルを音声化 (SRT=<path> LANG=<code> [JSON_ONLY=1] [ARGS=...])
 ifndef SRT
