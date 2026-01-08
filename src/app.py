@@ -142,8 +142,10 @@ def process_srt_file(
     if use_audio_tags:
         try:
             llm_client = LLMClient()
-            audio_tag_processor = AudioTagProcessor(llm_client, debug=debug)
-            print("[LLM] オーディオタグプロセッサ初期化完了")
+            audio_tag_processor = AudioTagProcessor(
+                llm_client, debug=debug, target_lang=lang
+            )
+            print(f"[LLM] オーディオタグプロセッサ初期化完了（言語バリデーション: {lang}）")
         except ValueError as e:
             print(f"[LLM] オーディオタグ無効: {e}")
         except Exception as e:

@@ -13,6 +13,7 @@ SRTファイルをElevenLabs APIで音声化するツール。LLMを使用して
 - gTTS（Google Text-to-Speech）
 - pydub（音声処理）
 - pysrt（SRTパース）
+- lingua-language-detector（言語検出・バリデーション）
 
 ### アーキテクチャ
 
@@ -22,6 +23,8 @@ SRTファイル
 [SRTパーサー] タイムスタンプ・テキスト抽出
     ↓
 [LLM] オーディオタグ付与（前後2エントリーのコンテキスト参照）
+    ↓
+[言語バリデーション] 出力言語が不一致なら再生成（最大3回リトライ）
     ↓
 [gTTS] 事前見積もり → 時間超過なら最大4回まで短縮を試行（無料）
     ↓
@@ -113,6 +116,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - [x] LLMによるテキスト短縮（時間枠内に収めるための再意訳）
 - [x] 分離されたリトライ上限（gTTS: 4回、ElevenLabs: 2回）
 - [x] 柔軟な音声配置（マージンベースの前後調整）
+- [x] 言語バリデーション（lingua-pyによる出力言語チェックと再生成）
 
 ## CLIオプション
 
