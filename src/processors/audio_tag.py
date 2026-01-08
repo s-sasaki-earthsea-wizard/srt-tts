@@ -2,7 +2,7 @@
 
 import logging
 
-from ..clients import LLMClient
+from ..clients import LLMClient, LLMRetryClient
 from ..prompts import load_prompt
 
 logger = logging.getLogger(__name__)
@@ -11,11 +11,17 @@ logger = logging.getLogger(__name__)
 class AudioTagProcessor:
     """LLMを使用してテキストにオーディオタグを付与するプロセッサ"""
 
-    def __init__(self, llm_client: LLMClient, debug: bool = False):
+    def __init__(
+        self, llm_client: LLMClient, debug: bool = False, target_lang: str | None = None
+    ):
         self.llm_client = llm_client
         self.debug = debug
+        self.target_lang = target_lang
         self.system_prompt = load_prompt("audio_tag_system")
         self.shorten_prompt = load_prompt("shorten_text_system")
+
+        # リトライ機能付きLLMクライアント
+        self.retry_client = LLMRetryClient(llm_client, target_lang)
 
     def add_tags(
         self,
@@ -71,8 +77,14 @@ class AudioTagProcessor:
             {"role": "user", "content": user_content},
         ]
 
-        result = self.llm_client.chat_json(messages)
-        tagged_text = result.get("tagged_text", text)
+        # リトライ機能付きでLLM呼び出し
+        tagged_text = self.retry_client.chat_json_with_validation(
+            messages=messages,
+            result_key="tagged_text",
+            fallback=text,
+            entry_index=entry_index,
+            operation="タグ付与",
+        )
 
         # デバッグログ: LLMからの応答
         if self.debug:
@@ -144,8 +156,14 @@ class AudioTagProcessor:
             {"role": "user", "content": user_content},
         ]
 
-        result = self.llm_client.chat_json(messages)
-        shortened_text = result.get("shortened_text", text)
+        # リトライ機能付きでLLM呼び出し
+        shortened_text = self.retry_client.chat_json_with_validation(
+            messages=messages,
+            result_key="shortened_text",
+            fallback=text,
+            entry_index=entry_index,
+            operation="短縮",
+        )
 
         # デバッグログ: LLMからの応答
         if self.debug:

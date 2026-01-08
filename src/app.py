@@ -93,6 +93,7 @@ def process_srt_file(
     margin_ms: int = 100,
     estimation_ratio: float | None = 0.9,
     lang: str = "ja",
+    shorten_ratio: float = 0.95,
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -110,6 +111,7 @@ def process_srt_file(
         margin_ms: エントリー間の最低マージン（ミリ秒）
         estimation_ratio: gTTS事前見積もりの補正係数（Noneで無効化）
         lang: gTTSの言語コード（デフォルト: ja）
+        shorten_ratio: 文字数削減の目標係数（デフォルト: 0.95）
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
@@ -123,6 +125,7 @@ def process_srt_file(
     print(f"エントリー間マージン: {margin_ms}ms")
     print(f"gTTS事前見積もり: {f'有効 (補正係数: {estimation_ratio})' if estimation_ratio else '無効'}")
     print(f"gTTS言語: {lang}")
+    print(f"文字数削減係数: {shorten_ratio}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -139,8 +142,10 @@ def process_srt_file(
     if use_audio_tags:
         try:
             llm_client = LLMClient()
-            audio_tag_processor = AudioTagProcessor(llm_client, debug=debug)
-            print("[LLM] オーディオタグプロセッサ初期化完了")
+            audio_tag_processor = AudioTagProcessor(
+                llm_client, debug=debug, target_lang=lang
+            )
+            print(f"[LLM] オーディオタグプロセッサ初期化完了（言語バリデーション: {lang}）")
         except ValueError as e:
             print(f"[LLM] オーディオタグ無効: {e}")
         except Exception as e:
@@ -167,6 +172,7 @@ def process_srt_file(
         margin_ms=margin_ms,
         gtts_estimator=gtts_estimator,
         lang=lang,
+        shorten_ratio=shorten_ratio,
     )
 
     # 処理
@@ -202,6 +208,8 @@ def process_srt_file(
                 print(f"処理中: [{subtitle.index}] {subtitle.text[:30]}...")
                 prev_texts = [s.text for s in subtitles[max(0, i - CONTEXT_WINDOW) : i]]
                 next_texts = [s.text for s in subtitles[i + 1 : i + 1 + CONTEXT_WINDOW]]
+                prev_entry_end_ms = subtitles[i - 1].end_ms if i > 0 else None
+                next_entry_start_ms = subtitles[i + 1].start_ms if i < len(subtitles) - 1 else None
 
                 # オーディオタグを付与
                 text = subtitle.text
@@ -218,11 +226,14 @@ def process_srt_file(
                     except Exception as e:
                         print(f"    [タグ付与エラー] {e}")
 
-                # 時間枠を計算して事前短縮
-                available_ms = subtitle.end_ms - subtitle.start_ms
+                # 時間枠を計算して事前短縮（前後エントリーとのバッファを考慮）
+                available_start, available_end = subtitle_processor._calculate_available_time_window(
+                    subtitle, prev_entry_end_ms, next_entry_start_ms
+                )
+                available_total = available_end - available_start
                 text, _ = subtitle_processor._pre_shorten_with_gtts(
                     text=text,
-                    available_total=available_ms,
+                    available_total=available_total,
                     subtitle=subtitle,
                     prev_texts=prev_texts if prev_texts else None,
                     next_texts=next_texts if next_texts else None,
@@ -312,14 +323,14 @@ def main() -> None:
     parser.add_argument(
         "--speed-threshold",
         type=float,
-        default=1.0,
-        help="速度調整の閾値（デフォルト: 1.0）。これ以下で再意訳を試行",
+        default=0.9,
+        help="速度調整の閾値（デフォルト: 0.9）。これ以下で再意訳を試行",
     )
     parser.add_argument(
         "--gtts-shorten-retries",
         type=int,
-        default=8,
-        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 8）",
+        default=4,
+        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 4）",
     )
     parser.add_argument(
         "--el-shorten-retries",
@@ -336,8 +347,8 @@ def main() -> None:
     parser.add_argument(
         "--estimation-ratio",
         type=float,
-        default=0.9,
-        help="gTTS事前見積もりの補正係数（デフォルト: 0.9）。0以下で無効化",
+        default=1.0,
+        help="gTTS事前見積もりの補正係数（デフォルト: 1.0）。0以下で無効化",
     )
     parser.add_argument(
         "--gtts-only",
@@ -349,6 +360,12 @@ def main() -> None:
         type=str,
         default="ja",
         help="gTTSの言語コード（デフォルト: ja）。例: en, ja, ko, zh-CN",
+    )
+    parser.add_argument(
+        "--shorten-ratio",
+        type=float,
+        default=0.95,
+        help="文字数削減の目標係数（デフォルト: 0.95）。速度比にこの係数を掛けた値が目標",
     )
 
     args = parser.parse_args()
@@ -388,6 +405,7 @@ def main() -> None:
         margin_ms=args.margin_ms,
         estimation_ratio=estimation_ratio,
         lang=args.lang,
+        shorten_ratio=args.shorten_ratio,
     )
 
 
