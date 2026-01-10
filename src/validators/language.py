@@ -19,6 +19,7 @@ LANG_CODE_MAP: dict[str, Language] = {
     "zh": Language.CHINESE,
     "ru": Language.RUSSIAN,
     "es": Language.SPANISH,
+    "id": Language.INDONESIAN,
 }
 
 
