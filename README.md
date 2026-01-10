@@ -104,6 +104,12 @@ make run SRT=srt/spanish.srt ARGS='--gtts-only --lang es'
 make run SRT=srt/korean.srt ARGS='--gtts-only --lang ko'
 ```
 
+#### インドネシア語（Bahasa Indonesia）
+
+```bash
+make run SRT=srt/indonesian.srt ARGS='--gtts-only --lang id'
+```
+
 ### オーディオタグ付きJSONのみ出力（TTS無し）
 
 開発・デバッグ用にTTSをスキップしてJSONのみを出力：
@@ -146,7 +152,7 @@ make clean   # Dockerイメージを削除
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
 | `--gtts-only` | - | gTTSのみで音声生成（ElevenLabsを使用しない） |
-| `--lang` | ja | gTTSの言語コード（例: en, ja, ko, zh-CN, ru, es） |
+| `--lang` | ja | gTTSの言語コード（例: en, ja, ko, zh-CN, ru, es, id） |
 | `--estimation-ratio` | 1.0 | gTTS事前見積もりの補正係数（0以下で無効化） |
 | `--gtts-shorten-retries` | 4 | gTTS事前見積もりでの再意訳リトライ回数 |
 | `--el-shorten-retries` | 2 | ElevenLabs生成後の再意訳リトライ回数 |
