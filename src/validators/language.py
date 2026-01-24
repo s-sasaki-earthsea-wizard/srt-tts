@@ -24,6 +24,13 @@ LANG_CODE_MAP: dict[str, Language] = {
     "hi": Language.HINDI,
 }
 
+# 近縁言語の許容マッピング（言語学的に近く、検出器が混同しやすい言語ペア）
+# キーの言語がターゲットの場合、値のセットに含まれる言語として検出されても許容する
+ACCEPTABLE_LANGUAGES: dict[Language, set[Language]] = {
+    # インドネシア語とマレー語は相互理解可能なほど近縁
+    Language.INDONESIAN: {Language.MALAY},
+}
+
 
 class LanguageValidator:
     """言語バリデーションを行うクラス"""
@@ -106,8 +113,18 @@ class LanguageValidator:
                 )
                 return True
 
-            # 言語が一致するかチェック
+            # 言語が一致するかチェック（近縁言語も許容）
             is_match = detected == self.target_language
+            is_acceptable = detected in ACCEPTABLE_LANGUAGES.get(
+                self.target_language, set()
+            )
+
+            if is_acceptable and not is_match:
+                logger.debug(
+                    f"[近縁言語として許容] 期待: {self.target_language.name}, "
+                    f"検出: {detected.name} ({confidence:.2f})"
+                )
+                return True
 
             if not is_match:
                 logger.warning(
