@@ -1,4 +1,4 @@
-.PHONY: build rebuild run clean help
+.PHONY: build rebuild run run-dir clean help
 .DEFAULT_GOAL := help
 
 IMAGE_NAME := srt-tts
@@ -22,6 +22,24 @@ else
 	docker compose run --rm srt-tts python -m src.app /app/$(SRT) --lang $(LANG) $(ARGS)
 endif
 
+run-dir: ## ディレクトリ内の全SRTファイルを音声化 (DIR=<path> [ARGS=...])
+ifndef DIR
+	$(error DIR is required. Usage: make run-dir DIR=srt/AI-weather-forecast)
+endif
+	@echo "処理対象ディレクトリ: $(DIR)"
+	@for file in $(DIR)/*-*.srt; do \
+		if [ -f "$$file" ]; then \
+			lang=$$(basename "$$file" .srt | rev | cut -d'-' -f1 | rev); \
+			echo ""; \
+			echo "========================================"; \
+			echo "処理中: $$file (言語: $$lang)"; \
+			echo "========================================"; \
+			docker compose run --rm srt-tts python -m src.app /app/$$file --lang $$lang $(ARGS); \
+		fi \
+	done
+	@echo ""
+	@echo "全ファイルの処理が完了しました"
+
 clean: ## Dockerイメージを削除
 	docker rmi $(IMAGE_NAME) || true
 
@@ -34,6 +52,7 @@ help: ## ヘルプを表示
 	@echo "引数:"
 	@echo "  SRT          入力SRTファイルのパス (例: srt/example.srt)"
 	@echo "  LANG         言語コード (必須: ja, en, ko, zh-CN, ru, es, etc.)"
+	@echo "  DIR          処理対象ディレクトリ (例: srt/AI-weather-forecast)"
 	@echo "  JSON_ONLY    1を指定するとTTSをスキップしてJSONのみ出力"
 	@echo "  ARGS         追加の引数 (例: --gtts-only)"
 	@echo ""
@@ -52,3 +71,5 @@ help: ## ヘルプを表示
 	@echo "  make run SRT=srt/example.srt LANG=en"
 	@echo "  make run SRT=srt/example.srt LANG=ja JSON_ONLY=1"
 	@echo "  make run SRT=srt/example.srt LANG=en ARGS='--gtts-only'"
+	@echo "  make run-dir DIR=srt/AI-weather-forecast"
+	@echo "  make run-dir DIR=srt/AI-weather-forecast ARGS='--gtts-only'"
