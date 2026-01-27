@@ -9,6 +9,18 @@ from gtts import gTTS
 from ..audio import get_audio_duration_ms
 
 
+# gTTSで非推奨警告が出る言語コードのマッピング
+# zh-TW は警告が出るため、音声合成時は zh を使用（字幕は繁体のまま）
+GTTS_LANG_MAPPING = {
+    "zh-TW": "zh",
+}
+
+
+def _get_gtts_lang(lang: str) -> str:
+    """gTTS用の言語コードを取得する（警告回避用マッピング適用）"""
+    return GTTS_LANG_MAPPING.get(lang, lang)
+
+
 class GTTSEstimator:
     """gTTSを使用して音声長を見積もるクライアント"""
 
@@ -57,7 +69,8 @@ class GTTSEstimator:
             temp_path = Path(f.name)
 
         try:
-            tts = gTTS(text=plain_text, lang=lang)
+            gtts_lang = _get_gtts_lang(lang)
+            tts = gTTS(text=plain_text, lang=gtts_lang)
             tts.save(str(temp_path))
 
             # 音声長を取得
@@ -111,7 +124,8 @@ class GTTSEstimator:
             return (output_path, 0)
 
         # 音声を生成
-        tts = gTTS(text=plain_text, lang=lang)
+        gtts_lang = _get_gtts_lang(lang)
+        tts = gTTS(text=plain_text, lang=gtts_lang)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         tts.save(str(output_path))
 
