@@ -3,13 +3,16 @@
 日本語SRTを読み込み、平文化して翻訳し、吹き替え用SRTを生成する。
 gTTSで発話時間を見積もり、タイムスタンプを調整する。
 時間枠に収まらない場合は再翻訳を行い、整合性を確認する。
+gTTSモードでは音声ファイルも生成する。
 """
 
 import json
 import logging
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.audio.processor import adjust_audio_speed, combine_audio_segments
 from src.clients.gtts import GTTSEstimator
 from src.clients.llm import LLMClient
 from src.parsers.srt import Subtitle, parse_srt
@@ -98,6 +101,8 @@ class DubbingScriptGenerator:
         margin_ms: int = 100,
         estimation_ratio: float = 1.0,
         retranslation_retries: int = 2,
+        gtts_only: bool = False,
+        speed_threshold: float = 0.9,
         debug: bool = False,
     ):
         """
@@ -107,6 +112,8 @@ class DubbingScriptGenerator:
             margin_ms: エントリー間の最低マージン（ミリ秒）
             estimation_ratio: gTTS見積もりの補正係数
             retranslation_retries: 再翻訳のリトライ回数
+            gtts_only: gTTSで音声ファイルも生成するか
+            speed_threshold: 速度調整の閾値（これ以下の比率なら速度調整）
             debug: デバッグモードを有効にするか
         """
         self.llm = LLMClient()
@@ -116,6 +123,8 @@ class DubbingScriptGenerator:
         self.consistency_check_prompt = _load_consistency_check_prompt()
         self.margin_ms = margin_ms
         self.retranslation_retries = retranslation_retries
+        self.gtts_only = gtts_only
+        self.speed_threshold = speed_threshold
         self.debug = debug
         self._language_validator: LanguageValidator | None = None
 
@@ -127,7 +136,7 @@ class DubbingScriptGenerator:
         input_path: str | Path,
         target_lang: str,
         output_path: str | Path | None = None,
-    ) -> Path:
+    ) -> Path | tuple[Path, Path]:
         """
         吹き替え脚本を生成する
 
@@ -137,7 +146,8 @@ class DubbingScriptGenerator:
             output_path: 出力SRTファイルのパス（省略時は自動生成）
 
         Returns:
-            出力ファイルのパス
+            gtts_only=False: 出力SRTファイルのパス
+            gtts_only=True: (SRTファイルのパス, MP3ファイルのパス)のタプル
         """
         input_path = Path(input_path)
 
@@ -195,6 +205,11 @@ class DubbingScriptGenerator:
         srt_content = _create_srt_content(final_entries)
         output_path.write_text(srt_content, encoding="utf-8")
         logger.info(f"SRTファイルを出力しました: {output_path}")
+
+        # gTTSモードの場合は音声ファイルも生成
+        if self.gtts_only:
+            audio_path = self._synthesize_audio(adjusted_entries, target_lang, output_path)
+            return (output_path, audio_path)
 
         return output_path
 
@@ -567,3 +582,88 @@ Evaluate whether the shortened version conveys the same core message."""
             logger.warning(f"[{entry_index}] 整合性確認エラー: {e}")
             # エラー時は安全のため不整合とする
             return False
+
+    def _synthesize_audio(
+        self,
+        entries: list[EstimatedEntry],
+        target_lang: str,
+        srt_path: Path,
+    ) -> Path:
+        """
+        各エントリーの音声を合成し、結合してMP3ファイルを生成する
+
+        Args:
+            entries: タイムスタンプ調整済みのエントリーリスト
+            target_lang: ターゲット言語コード
+            srt_path: 出力SRTファイルのパス（MP3パス決定用）
+
+        Returns:
+            生成されたMP3ファイルのパス
+        """
+        logger.info("音声合成を開始します...")
+
+        # 一時ディレクトリを作成
+        temp_dir = Path(tempfile.mkdtemp(prefix="dubbing_"))
+        audio_segments: list[tuple[int, Path]] = []
+
+        try:
+            for i, entry in enumerate(entries):
+                if not entry.text or entry.adjusted_start_ms is None:
+                    continue
+
+                # gTTSで音声を生成
+                temp_audio_path = temp_dir / f"segment_{i:04d}.mp3"
+                _, actual_duration_ms = self.gtts.synthesize(
+                    entry.text, temp_audio_path, target_lang
+                )
+
+                # 割り当て時間を計算
+                allocated_duration_ms = entry.adjusted_end_ms - entry.adjusted_start_ms
+
+                # 速度調整が必要か判定
+                if actual_duration_ms > allocated_duration_ms:
+                    speed_ratio = allocated_duration_ms / actual_duration_ms
+                    if speed_ratio >= self.speed_threshold:
+                        # 速度調整で対応
+                        adjusted_audio_path = temp_dir / f"adjusted_{i:04d}.mp3"
+                        adjust_audio_speed(
+                            temp_audio_path, allocated_duration_ms, adjusted_audio_path
+                        )
+                        audio_segments.append((entry.adjusted_start_ms, adjusted_audio_path))
+                        if self.debug:
+                            logger.debug(
+                                f"[{i + 1}] 速度調整: {actual_duration_ms}ms → "
+                                f"{allocated_duration_ms}ms (速度比: {1/speed_ratio:.2f}x)"
+                            )
+                    else:
+                        # 速度調整の閾値を超えている場合は警告
+                        logger.warning(
+                            f"[{i + 1}] 速度調整閾値超過: "
+                            f"必要な速度比 {1/speed_ratio:.2f}x > {1/self.speed_threshold:.2f}x"
+                        )
+                        # それでも速度調整を適用
+                        adjusted_audio_path = temp_dir / f"adjusted_{i:04d}.mp3"
+                        adjust_audio_speed(
+                            temp_audio_path, allocated_duration_ms, adjusted_audio_path
+                        )
+                        audio_segments.append((entry.adjusted_start_ms, adjusted_audio_path))
+                else:
+                    # そのまま使用
+                    audio_segments.append((entry.adjusted_start_ms, temp_audio_path))
+                    if self.debug:
+                        logger.debug(
+                            f"[{i + 1}] 音声生成完了: {actual_duration_ms}ms "
+                            f"(枠: {allocated_duration_ms}ms)"
+                        )
+
+            # 全音声を結合
+            output_audio_path = srt_path.with_suffix(".mp3")
+            combine_audio_segments(audio_segments, output_audio_path)
+            logger.info(f"音声ファイルを出力しました: {output_audio_path}")
+
+            return output_audio_path
+
+        finally:
+            # 一時ファイルを削除
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)

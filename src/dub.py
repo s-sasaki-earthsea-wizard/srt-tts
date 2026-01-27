@@ -51,6 +51,17 @@ def main() -> None:
         help="再翻訳のリトライ回数（デフォルト: 2）",
     )
     parser.add_argument(
+        "--gtts-only",
+        action="store_true",
+        help="gTTSで音声ファイル（MP3）も生成する",
+    )
+    parser.add_argument(
+        "--speed-threshold",
+        type=float,
+        default=0.9,
+        help="速度調整の閾値（デフォルト: 0.9）",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="デバッグモードを有効にする",
@@ -81,15 +92,22 @@ def main() -> None:
         margin_ms=args.margin_ms,
         estimation_ratio=args.estimation_ratio,
         retranslation_retries=args.retranslation_retries,
+        gtts_only=args.gtts_only,
+        speed_threshold=args.speed_threshold,
         debug=args.debug,
     )
-    output_path = generator.generate(
+    result = generator.generate(
         input_path=input_path,
         target_lang=args.lang,
         output_path=args.output,
     )
 
-    print(f"吹き替え脚本を生成しました: {output_path}")
+    if args.gtts_only:
+        srt_path, audio_path = result
+        print(f"吹き替え脚本を生成しました: {srt_path}")
+        print(f"音声ファイルを生成しました: {audio_path}")
+    else:
+        print(f"吹き替え脚本を生成しました: {result}")
 
 
 if __name__ == "__main__":

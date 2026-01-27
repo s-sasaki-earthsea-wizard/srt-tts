@@ -18,6 +18,9 @@ LLMを使用してオーディオタグ（表現タグ）を自動付与し、�
 - 多言語対応（gTTSモード）
 - タグ付きテキストのJSON出力
 - 言語バリデーション（出力が指定言語と異なる場合の自動再生成）
+- **吹き替え脚本生成**（日本語SRT → 他言語SRT + 音声）
+  - gTTSで発話時間を見積もり、タイムスタンプを自動調整
+  - 時間枠に収まらない場合はLLMで再翻訳（整合性確認付き）
 
 ## 開発環境
 
@@ -130,6 +133,67 @@ make run SRT=srt/hindi.srt ARGS='--gtts-only --lang hi'
 make run SRT=srt/example.srt JSON_ONLY=1
 ```
 
+## 吹き替え脚本生成
+
+日本語SRTファイルから他言語の吹き替え用SRTと音声を生成します。
+
+### 吹き替えSRTのみ生成
+
+```bash
+make dub SRT=srt/video-jp.srt LANG=en
+```
+
+出力：`srt/video-en.srt`
+
+### 吹き替えSRT + 音声を生成
+
+```bash
+make dub-audio SRT=srt/video-jp.srt LANG=en
+```
+
+出力：`srt/video-en.srt` + `srt/video-en.mp3`
+
+### 既存SRTから音声のみ生成
+
+SRTを手動で編集した後に音声を再生成する場合：
+
+```bash
+make synth SRT=srt/video-en.srt LANG=en
+```
+
+出力：`srt/video-en.mp3`
+
+### 対応言語の例
+
+```bash
+make dub-audio SRT=srt/video-jp.srt LANG=en    # 英語
+make dub-audio SRT=srt/video-jp.srt LANG=ru    # ロシア語
+make dub-audio SRT=srt/video-jp.srt LANG=es    # スペイン語
+make dub-audio SRT=srt/video-jp.srt LANG=ko    # 韓国語
+make dub-audio SRT=srt/video-jp.srt LANG=zh-CN # 中国語（簡体字）
+```
+
+### 吹き替え生成の処理フロー
+
+```text
+日本語SRTファイル
+    ↓
+[SRTパーサー] タイムスタンプ・テキスト抽出
+    ↓
+[LLM] ターゲット言語へ翻訳
+    ↓
+[gTTS] 発話時間見積もり
+    ↓
+[タイムスタンプ調整]
+  - 時間枠内に収まる → そのまま
+  - 超過 → 前の隙間を使う / 次の字幕まで使う
+  - それでも超過 → LLMで再翻訳（整合性確認付き）
+    ↓
+[音声合成（オプション）] gTTSで音声生成 + 必要に応じて速度調整
+    ↓
+翻訳済みSRT（+ MP3）ファイル生成
+```
+
 ### その他のオプション
 
 ```bash
@@ -197,14 +261,17 @@ SRTファイル
 
 ## プロジェクト構成
 
-```
+```text
 srt-tts/
 ├── src/
-│   ├── app.py              # メインアプリケーション
+│   ├── app.py              # 音声化メインアプリケーション
+│   ├── dub.py              # 吹き替え脚本生成
+│   ├── synth.py            # 既存SRTから音声合成
 │   ├── parsers/            # SRTパーサー
 │   ├── clients/            # API クライアント（TTS, LLM, gTTS）
 │   ├── audio/              # 音声処理
-│   ├── processors/         # オーディオタグ処理
+│   ├── processors/         # オーディオタグ・吹き替え脚本処理
+│   ├── prompts/            # LLMプロンプト
 │   └── validators/         # 言語バリデーション
 ├── srt/                    # 入力SRTファイル
 ├── output/                 # 出力ファイル

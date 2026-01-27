@@ -1,4 +1,4 @@
-.PHONY: build rebuild run run-dir dub clean help
+.PHONY: build rebuild run run-dir dub dub-audio synth clean help
 .DEFAULT_GOAL := help
 
 IMAGE_NAME := srt-tts
@@ -49,6 +49,24 @@ ifndef LANG
 endif
 	docker compose run --rm srt-tts python -m src.dub /app/$(SRT) --lang $(LANG) $(ARGS)
 
+dub-audio: ## 日本語SRTから吹き替え用SRT+音声を生成 (SRT=<path> LANG=<code> [ARGS=...])
+ifndef SRT
+	$(error SRT is required. Usage: make dub-audio SRT=srt/example-jp.srt LANG=en)
+endif
+ifndef LANG
+	$(error LANG is required. Usage: make dub-audio SRT=srt/example-jp.srt LANG=en)
+endif
+	docker compose run --rm srt-tts python -m src.dub /app/$(SRT) --lang $(LANG) --gtts-only $(ARGS)
+
+synth: ## 既存SRTからgTTSで音声を生成 (SRT=<path> LANG=<code> [ARGS=...])
+ifndef SRT
+	$(error SRT is required. Usage: make synth SRT=srt/example-en.srt LANG=en)
+endif
+ifndef LANG
+	$(error LANG is required. Usage: make synth SRT=srt/example-en.srt LANG=en)
+endif
+	docker compose run --rm srt-tts python -m src.synth /app/$(SRT) --lang $(LANG) $(ARGS)
+
 clean: ## Dockerイメージを削除
 	docker rmi $(IMAGE_NAME) || true
 
@@ -84,5 +102,6 @@ help: ## ヘルプを表示
 	@echo "  make run-dir DIR=srt/AI-weather-forecast ARGS='--gtts-only'"
 	@echo ""
 	@echo "吹き替え脚本生成:"
-	@echo "  make dub SRT=srt/example-jp.srt LANG=en     # 日本語SRTから英語吹き替え脚本を生成"
-	@echo "  make dub SRT=srt/example-jp.srt LANG=ru     # 日本語SRTからロシア語吹き替え脚本を生成"
+	@echo "  make dub SRT=srt/example-jp.srt LANG=en           # 日本語SRTから英語吹き替えSRTを生成"
+	@echo "  make dub-audio SRT=srt/example-jp.srt LANG=en     # 日本語SRTから英語吹き替えSRT+音声を生成"
+	@echo "  make synth SRT=srt/example-en.srt LANG=en         # 既存SRTから音声のみ生成"
