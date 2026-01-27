@@ -33,6 +33,18 @@ def main() -> None:
         help="出力SRTファイルのパス（省略時は自動生成）",
     )
     parser.add_argument(
+        "--margin-ms",
+        type=int,
+        default=100,
+        help="エントリー間の最低マージン（ミリ秒、デフォルト: 100）",
+    )
+    parser.add_argument(
+        "--estimation-ratio",
+        type=float,
+        default=1.0,
+        help="gTTS見積もりの補正係数（デフォルト: 1.0）",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="デバッグモードを有効にする",
@@ -59,7 +71,11 @@ def main() -> None:
         sys.exit(1)
 
     # 吹き替え脚本生成
-    generator = DubbingScriptGenerator(debug=args.debug)
+    generator = DubbingScriptGenerator(
+        margin_ms=args.margin_ms,
+        estimation_ratio=args.estimation_ratio,
+        debug=args.debug,
+    )
     output_path = generator.generate(
         input_path=input_path,
         target_lang=args.lang,
