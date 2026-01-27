@@ -2,6 +2,7 @@
 
 日本語SRTを読み込み、平文化して翻訳し、吹き替え用SRTを生成する。
 gTTSで発話時間を見積もり、タイムスタンプを調整する。
+時間枠に収まらない場合は再翻訳を行い、整合性を確認する。
 """
 
 import json
@@ -12,6 +13,7 @@ from pathlib import Path
 from src.clients.gtts import GTTSEstimator
 from src.clients.llm import LLMClient
 from src.parsers.srt import Subtitle, parse_srt
+from src.validators.language import LanguageValidator
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +26,10 @@ class EstimatedEntry:
     end_ms: int  # 元の終了時刻
     text: str  # 翻訳テキスト
     estimated_duration_ms: int  # gTTSによる見積もり発話時間
+    source_text: str = ""  # 元の日本語テキスト（整合性確認用）
     adjusted_start_ms: int | None = None  # 調整後の開始時刻
     adjusted_end_ms: int | None = None  # 調整後の終了時刻
+    retranslation_attempts: int = 0  # 再翻訳試行回数
 
     @property
     def original_duration_ms(self) -> int:
@@ -74,6 +78,18 @@ def _create_srt_content(entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _load_retranslation_prompt() -> str:
+    """再翻訳用システムプロンプトを読み込む"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / "retranslation_system.md"
+    return prompt_path.read_text(encoding="utf-8")
+
+
+def _load_consistency_check_prompt() -> str:
+    """整合性確認用システムプロンプトを読み込む"""
+    prompt_path = Path(__file__).parent.parent / "prompts" / "consistency_check_system.md"
+    return prompt_path.read_text(encoding="utf-8")
+
+
 class DubbingScriptGenerator:
     """吹き替え脚本生成プロセッサ"""
 
@@ -81,6 +97,7 @@ class DubbingScriptGenerator:
         self,
         margin_ms: int = 100,
         estimation_ratio: float = 1.0,
+        retranslation_retries: int = 2,
         debug: bool = False,
     ):
         """
@@ -89,13 +106,18 @@ class DubbingScriptGenerator:
         Args:
             margin_ms: エントリー間の最低マージン（ミリ秒）
             estimation_ratio: gTTS見積もりの補正係数
+            retranslation_retries: 再翻訳のリトライ回数
             debug: デバッグモードを有効にするか
         """
         self.llm = LLMClient()
         self.gtts = GTTSEstimator(estimation_ratio=estimation_ratio)
         self.system_prompt = _load_system_prompt()
+        self.retranslation_prompt = _load_retranslation_prompt()
+        self.consistency_check_prompt = _load_consistency_check_prompt()
         self.margin_ms = margin_ms
+        self.retranslation_retries = retranslation_retries
         self.debug = debug
+        self._language_validator: LanguageValidator | None = None
 
         if debug:
             logging.basicConfig(level=logging.DEBUG)
@@ -136,20 +158,29 @@ class DubbingScriptGenerator:
         logger.info(f"ターゲット言語: {target_lang}")
         logger.info(f"出力ファイル: {output_path}")
 
+        # ターゲット言語を保持
+        self._target_lang = target_lang
+        self._language_validator = LanguageValidator(target_lang)
+
         # SRTを読み込み
         subtitles = parse_srt(input_path)
         logger.info(f"読み込んだエントリー数: {len(subtitles)}")
+
+        # ソーステキストのマッピングを作成（整合性確認用）
+        source_texts = {sub.index: sub.text for sub in subtitles}
 
         # LLMで翻訳
         translated_entries = self._translate_with_llm(subtitles, target_lang)
         logger.info(f"生成されたエントリー数: {len(translated_entries)}")
 
-        # gTTSで発話時間を見積もり
-        estimated_entries = self._estimate_durations(translated_entries, target_lang)
+        # gTTSで発話時間を見積もり（ソーステキストも渡す）
+        estimated_entries = self._estimate_durations(
+            translated_entries, target_lang, source_texts
+        )
         over_count = sum(1 for e in estimated_entries if e.is_over_duration)
         logger.info(f"時間超過エントリー数: {over_count}/{len(estimated_entries)}")
 
-        # タイムスタンプを調整
+        # タイムスタンプを調整（再翻訳を含む）
         adjusted_entries = self._adjust_timestamps(estimated_entries)
 
         # SRTファイルを生成
@@ -212,7 +243,10 @@ Please return the translated entries as a JSON object with the structure specifi
         return response.get("entries", [])
 
     def _estimate_durations(
-        self, entries: list[dict], target_lang: str
+        self,
+        entries: list[dict],
+        target_lang: str,
+        source_texts: dict[int, str] | None = None,
     ) -> list[EstimatedEntry]:
         """
         gTTSで各エントリーの発話時間を見積もる
@@ -220,6 +254,7 @@ Please return the translated entries as a JSON object with the structure specifi
         Args:
             entries: 翻訳されたエントリーのリスト
             target_lang: ターゲット言語コード
+            source_texts: インデックスをキーとするソーステキストの辞書
 
         Returns:
             見積もり結果を含むエントリーのリスト
@@ -227,11 +262,17 @@ Please return the translated entries as a JSON object with the structure specifi
         estimated = []
         for i, entry in enumerate(entries):
             duration_ms = self.gtts.estimate_duration_ms(entry["text"], target_lang)
+            # ソーステキストを取得（LLMがエントリーを統合/分割している可能性があるので近似）
+            source_text = ""
+            if source_texts:
+                # エントリーのインデックスに対応するソーステキストを探す
+                source_text = source_texts.get(i + 1, "")
             estimated_entry = EstimatedEntry(
                 start_ms=entry["start_ms"],
                 end_ms=entry["end_ms"],
                 text=entry["text"],
                 estimated_duration_ms=duration_ms,
+                source_text=source_text,
             )
             if self.debug:
                 status = "超過" if estimated_entry.is_over_duration else "OK"
@@ -279,12 +320,6 @@ Please return the translated entries as a JSON object with the structure specifi
             if earliest_start_ms < entry.start_ms:
                 available_start_ms = earliest_start_ms
 
-            # デフォルトの終了時刻
-            default_end_ms = entry.end_ms
-
-            # 必要な終了時刻（開始 + 見積もり発話時間）
-            needed_end_ms = available_start_ms + entry.estimated_duration_ms
-
             # ケース1: 元の時間枠内に収まる
             if entry.estimated_duration_ms <= entry.original_duration_ms:
                 entry.adjusted_start_ms = entry.start_ms
@@ -329,30 +364,206 @@ Please return the translated entries as a JSON object with the structure specifi
                             )
                         continue
 
-            # ケース4: どうしても収まらない場合は警告
-            # 次のエントリーと重ならないよう、終了時刻を制限する
+            # ケース4: 再翻訳を試みる
             adjusted_start = earliest_start_ms if earliest_start_ms < entry.start_ms else entry.start_ms
-            needed_end = adjusted_start + entry.estimated_duration_ms
 
-            # 次のエントリーがある場合は、その開始時刻 - margin_ms を終了時刻の上限とする
+            # 利用可能な時間枠を計算
             if i + 1 < len(entries):
                 max_end_ms = entries[i + 1].start_ms - self.margin_ms
-                adjusted_end = min(needed_end, max_end_ms)
             else:
-                adjusted_end = needed_end
+                max_end_ms = adjusted_start + entry.estimated_duration_ms
 
-            entry.adjusted_start_ms = adjusted_start
-            entry.adjusted_end_ms = adjusted_end
+            available_duration_ms = max_end_ms - adjusted_start
 
-            # 実際に必要な時間と割り当てられた時間の差を計算
-            allocated_duration = adjusted_end - adjusted_start
-            shortage_ms = entry.estimated_duration_ms - allocated_duration
+            # 再翻訳を試みる
+            retranslated = self._retranslate_entry(entry, available_duration_ms, i + 1)
 
-            logger.warning(
-                f"[{i + 1}] 時間枠に収まりません: "
-                f"枠{entry.original_duration_ms}ms / 見積もり{entry.estimated_duration_ms}ms / "
-                f"割当{allocated_duration}ms (不足{shortage_ms}ms, 将来的に再翻訳が必要): "
-                f"{entry.text[:50]}..."
-            )
+            if retranslated:
+                # 再翻訳成功
+                entry.text = retranslated["text"]
+                entry.estimated_duration_ms = retranslated["duration_ms"]
+                entry.adjusted_start_ms = adjusted_start
+                entry.adjusted_end_ms = adjusted_start + retranslated["duration_ms"]
+                if self.debug:
+                    logger.debug(
+                        f"[{i + 1}] 再翻訳成功: "
+                        f"{entry.estimated_duration_ms}ms → {retranslated['duration_ms']}ms"
+                    )
+            else:
+                # 再翻訳失敗、元の時間枠で配置（速度調整で対応）
+                entry.adjusted_start_ms = adjusted_start
+                entry.adjusted_end_ms = min(
+                    adjusted_start + entry.estimated_duration_ms, max_end_ms
+                )
+
+                allocated_duration = entry.adjusted_end_ms - adjusted_start
+                shortage_ms = entry.estimated_duration_ms - allocated_duration
+
+                logger.warning(
+                    f"[{i + 1}] 再翻訳失敗、速度調整が必要: "
+                    f"枠{entry.original_duration_ms}ms / 見積もり{entry.estimated_duration_ms}ms / "
+                    f"割当{allocated_duration}ms (不足{shortage_ms}ms): "
+                    f"{entry.text[:50]}..."
+                )
 
         return entries
+
+    def _retranslate_entry(
+        self,
+        entry: EstimatedEntry,
+        target_duration_ms: int,
+        entry_index: int,
+    ) -> dict | None:
+        """
+        エントリーを再翻訳して時間枠に収める
+
+        Args:
+            entry: 再翻訳対象のエントリー
+            target_duration_ms: 目標の発話時間（ミリ秒）
+            entry_index: エントリーのインデックス（ログ用）
+
+        Returns:
+            成功時: {"text": str, "duration_ms": int}
+            失敗時: None
+        """
+        if not self._target_lang:
+            return None
+
+        original_text = entry.text
+
+        for attempt in range(self.retranslation_retries):
+            entry.retranslation_attempts += 1
+
+            # 目標文字数を概算（日本語の場合の目安: 1秒あたり約4-5文字、英語は約2-3単語）
+            # gTTSの速度から逆算
+            target_chars = int(len(original_text) * target_duration_ms / entry.estimated_duration_ms * 0.95)
+
+            user_prompt = f"""Please shorten the following translation to fit within the time constraint.
+
+## Original Translation
+{original_text}
+
+## Time Constraint
+- Current estimated duration: {entry.estimated_duration_ms}ms
+- Target duration: {target_duration_ms}ms
+- Suggested character count: approximately {target_chars} characters or fewer
+
+## Source Text (Japanese, for reference)
+{entry.source_text if entry.source_text else "(not available)"}
+
+Please create a shorter version that preserves the core meaning."""
+
+            messages = [
+                {"role": "system", "content": self.retranslation_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            try:
+                response = self.llm.chat_json(messages)
+                retranslated_text = response.get("retranslated_text", "")
+
+                if not retranslated_text:
+                    logger.warning(f"[{entry_index}] 再翻訳レスポンスが空 (試行{attempt + 1})")
+                    continue
+
+                # 言語検証
+                if self._language_validator and not self._language_validator.validate(retranslated_text):
+                    logger.warning(
+                        f"[{entry_index}] 再翻訳の言語が不正 (試行{attempt + 1}): "
+                        f"{retranslated_text[:30]}..."
+                    )
+                    continue
+
+                # gTTSで再見積もり
+                new_duration_ms = self.gtts.estimate_duration_ms(
+                    retranslated_text, self._target_lang
+                )
+
+                # 整合性確認
+                if not self._check_consistency(original_text, retranslated_text, entry.source_text, entry_index):
+                    logger.warning(
+                        f"[{entry_index}] 再翻訳の整合性確認失敗 (試行{attempt + 1})"
+                    )
+                    continue
+
+                # 時間枠に収まるか確認
+                if new_duration_ms <= target_duration_ms:
+                    if self.debug:
+                        logger.debug(
+                            f"[{entry_index}] 再翻訳成功 (試行{attempt + 1}): "
+                            f"{entry.estimated_duration_ms}ms → {new_duration_ms}ms"
+                        )
+                    return {"text": retranslated_text, "duration_ms": new_duration_ms}
+
+                # まだ長すぎる場合は次の試行で更に短くする
+                original_text = retranslated_text
+                if self.debug:
+                    logger.debug(
+                        f"[{entry_index}] 再翻訳後もまだ長い (試行{attempt + 1}): "
+                        f"{new_duration_ms}ms > {target_duration_ms}ms"
+                    )
+
+            except Exception as e:
+                logger.warning(f"[{entry_index}] 再翻訳エラー (試行{attempt + 1}): {e}")
+                continue
+
+        return None
+
+    def _check_consistency(
+        self,
+        original_text: str,
+        retranslated_text: str,
+        source_text: str,
+        entry_index: int,
+    ) -> bool:
+        """
+        再翻訳結果と元のテキストの整合性を確認する
+
+        Args:
+            original_text: 元の翻訳テキスト
+            retranslated_text: 再翻訳されたテキスト
+            source_text: 元の日本語テキスト
+            entry_index: エントリーのインデックス（ログ用）
+
+        Returns:
+            整合性がある場合True
+        """
+        user_prompt = f"""Please check if the shortened translation preserves the essential meaning.
+
+## Original Translation
+{original_text}
+
+## Shortened Translation
+{retranslated_text}
+
+## Source Text (Japanese, for reference)
+{source_text if source_text else "(not available)"}
+
+Evaluate whether the shortened version conveys the same core message."""
+
+        messages = [
+            {"role": "system", "content": self.consistency_check_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        try:
+            response = self.llm.chat_json(messages)
+            is_consistent = response.get("is_consistent", False)
+            confidence = response.get("confidence", 0.0)
+            issues = response.get("issues", [])
+
+            if self.debug:
+                logger.debug(
+                    f"[{entry_index}] 整合性確認: "
+                    f"consistent={is_consistent}, confidence={confidence:.2f}"
+                )
+                if issues:
+                    logger.debug(f"[{entry_index}] 問題点: {issues}")
+
+            # 信頼度が0.7以上で整合性ありの場合のみ許可
+            return is_consistent and confidence >= 0.7
+
+        except Exception as e:
+            logger.warning(f"[{entry_index}] 整合性確認エラー: {e}")
+            # エラー時は安全のため不整合とする
+            return False

@@ -45,6 +45,12 @@ def main() -> None:
         help="gTTS見積もりの補正係数（デフォルト: 1.0）",
     )
     parser.add_argument(
+        "--retranslation-retries",
+        type=int,
+        default=2,
+        help="再翻訳のリトライ回数（デフォルト: 2）",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="デバッグモードを有効にする",
@@ -74,6 +80,7 @@ def main() -> None:
     generator = DubbingScriptGenerator(
         margin_ms=args.margin_ms,
         estimation_ratio=args.estimation_ratio,
+        retranslation_retries=args.retranslation_retries,
         debug=args.debug,
     )
     output_path = generator.generate(
