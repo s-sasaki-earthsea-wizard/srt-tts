@@ -12,8 +12,9 @@ from dotenv import load_dotenv
 
 from .audio import combine_audio_segments
 from .clients import GTTSEstimator, LLMClient, TTSClient
-from .parsers import Subtitle, parse_srt
+from .parsers import Subtitle, parse_srt, write_srt
 from .processors import AudioTagProcessor, SubtitleProcessor
+from .validators import ConsistencyValidator
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ def process_srt_file(
     estimation_ratio: float | None = 0.9,
     lang: str = "ja",
     shorten_ratio: float = 0.95,
+    consistency_check: bool = True,
 ) -> None:
     """
     SRTファイルを処理して音声ファイルを生成する
@@ -112,6 +114,7 @@ def process_srt_file(
         estimation_ratio: gTTS事前見積もりの補正係数（Noneで無効化）
         lang: gTTSの言語コード（デフォルト: ja）
         shorten_ratio: 文字数削減の目標係数（デフォルト: 0.95）
+        consistency_check: 短縮テキストの意味一貫性チェックを有効にするか
     """
     print(f"処理開始: {srt_path}")
     print(f"出力先: {output_path}")
@@ -126,6 +129,7 @@ def process_srt_file(
     print(f"gTTS事前見積もり: {f'有効 (補正係数: {estimation_ratio})' if estimation_ratio else '無効'}")
     print(f"gTTS言語: {lang}")
     print(f"文字数削減係数: {shorten_ratio}")
+    print(f"意味一貫性チェック: {'有効' if consistency_check else '無効'}")
 
     # SRTをパース
     subtitles = parse_srt(srt_path)
@@ -137,8 +141,9 @@ def process_srt_file(
         tts_client = TTSClient()
         print("[TTS] クライアント初期化完了")
 
-    # オーディオタグプロセッサを初期化
+    # オーディオタグプロセッサと意味一貫性バリデーターを初期化
     audio_tag_processor = None
+    consistency_validator = None
     if use_audio_tags:
         try:
             llm_client = LLMClient()
@@ -146,6 +151,12 @@ def process_srt_file(
                 llm_client, debug=debug, target_lang=lang
             )
             print(f"[LLM] オーディオタグプロセッサ初期化完了（言語バリデーション: {lang}）")
+
+            if consistency_check:
+                consistency_validator = ConsistencyValidator(
+                    llm_client, debug=debug
+                )
+                print("[LLM] 意味一貫性バリデーター初期化完了")
         except ValueError as e:
             print(f"[LLM] オーディオタグ無効: {e}")
         except Exception as e:
@@ -173,6 +184,7 @@ def process_srt_file(
         gtts_estimator=gtts_estimator,
         lang=lang,
         shorten_ratio=shorten_ratio,
+        consistency_validator=consistency_validator,
     )
 
     # 処理
@@ -249,6 +261,17 @@ def process_srt_file(
 
                 print(f"    [gTTS生成] {duration_ms}ms")
 
+                # 時間超過の警告を記録
+                if duration_ms > available_total:
+                    subtitle_processor.warnings.append({
+                        "index": subtitle.index,
+                        "type": "time_overflow",
+                        "available_ms": available_total,
+                        "duration_ms": duration_ms,
+                        "speed_ratio": round(available_total / duration_ms, 3) if duration_ms > 0 else 0,
+                        "text": text,
+                    })
+
             # 全ての音声を結合
             print("音声を結合中...")
             combine_audio_segments(audio_segments, output_path)
@@ -290,6 +313,23 @@ def process_srt_file(
         json_output_path,
         durations_ms=durations_ms if durations_ms else None,
     )
+
+    # タグ付きSRTを保存
+    tagged_srt_path = output_path.with_suffix(".tagged.srt")
+    write_srt(subtitles, tagged_texts, tagged_srt_path)
+    print(f"[タグ付きSRT保存] {tagged_srt_path}")
+
+    # 警告JSONを保存（警告がある場合のみ）
+    if subtitle_processor.warnings:
+        warnings_path = output_path.with_suffix(".warnings.json")
+        warnings_data = {
+            "source": srt_path.name,
+            "warnings": subtitle_processor.warnings,
+        }
+        warnings_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(warnings_path, "w", encoding="utf-8") as f:
+            json.dump(warnings_data, f, ensure_ascii=False, indent=2)
+        print(f"[警告JSON保存] {warnings_path} ({len(subtitle_processor.warnings)}件)")
 
     print(f"完了: {output_path}")
 
@@ -367,6 +407,11 @@ def main() -> None:
         default=0.95,
         help="文字数削減の目標係数（デフォルト: 0.95）。速度比にこの係数を掛けた値が目標",
     )
+    parser.add_argument(
+        "--no-consistency-check",
+        action="store_true",
+        help="短縮テキストの意味一貫性チェックを無効にする",
+    )
 
     args = parser.parse_args()
 
@@ -406,6 +451,7 @@ def main() -> None:
         estimation_ratio=estimation_ratio,
         lang=args.lang,
         shorten_ratio=args.shorten_ratio,
+        consistency_check=not args.no_consistency_check,
     )
 
 

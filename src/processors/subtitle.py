@@ -6,6 +6,7 @@ from pathlib import Path
 from ..audio import adjust_audio_speed, get_audio_duration_ms
 from ..clients import GTTSEstimator, TTSClient
 from ..parsers import Subtitle
+from ..validators import ConsistencyValidator
 from .audio_tag import AudioTagProcessor
 
 
@@ -23,6 +24,7 @@ class SubtitleProcessor:
         gtts_estimator: GTTSEstimator | None = None,
         lang: str = "ja",
         shorten_ratio: float = 0.95,
+        consistency_validator: ConsistencyValidator | None = None,
     ):
         """
         Args:
@@ -35,6 +37,7 @@ class SubtitleProcessor:
             gtts_estimator: gTTSによる事前見積もりクライアント（Noneの場合はスキップ）
             lang: gTTSの言語コード（デフォルト: ja）
             shorten_ratio: 文字数削減の目標係数（デフォルト: 0.95）
+            consistency_validator: 意味一貫性バリデーター（Noneの場合はスキップ）
         """
         self.tts_client = tts_client
         self.audio_tag_processor = audio_tag_processor
@@ -45,6 +48,8 @@ class SubtitleProcessor:
         self.gtts_estimator = gtts_estimator
         self.lang = lang
         self.shorten_ratio = shorten_ratio
+        self.consistency_validator = consistency_validator
+        self.warnings: list[dict] = []
 
     def process(
         self,
@@ -301,6 +306,14 @@ class SubtitleProcessor:
         adjusted_path = temp_dir / f"adjusted_{subtitle.index}.mp3"
         adjust_audio_speed(raw_audio_path, target_duration, adjusted_path)
         print(f"    速度調整: {audio_duration}ms -> {target_duration}ms")
+        self.warnings.append({
+            "index": subtitle.index,
+            "type": "time_overflow",
+            "available_ms": target_duration,
+            "duration_ms": audio_duration,
+            "speed_ratio": round(target_duration / audio_duration, 3) if audio_duration > 0 else 0,
+            "text": text,
+        })
         return (start_ms if start_ms is not None else subtitle.start_ms, adjusted_path, text)
 
     def _shorten_text(
@@ -313,7 +326,7 @@ class SubtitleProcessor:
         prev_texts: list[str] | None,
         next_texts: list[str] | None,
     ) -> str | None:
-        """テキストを短縮する。エラー時はNoneを返す"""
+        """テキストを短縮する。エラーまたは整合性チェック失敗時はNoneを返す"""
         if not self.audio_tag_processor:
             return None
 
@@ -334,6 +347,24 @@ class SubtitleProcessor:
                 entry_index=subtitle.index,
             )
             print(f"    短縮後: {shortened_text}")
+
+            # 意味一貫性チェック
+            if self.consistency_validator:
+                if not self.consistency_validator.check(
+                    original_text=text,
+                    shortened_text=shortened_text,
+                    entry_index=subtitle.index,
+                ):
+                    print(f"    [整合性チェック不合格] 短縮テキストを棄却")
+                    self.warnings.append({
+                        "index": subtitle.index,
+                        "type": "consistency_check_failed",
+                        "original_text": text,
+                        "shortened_text": shortened_text,
+                    })
+                    return None
+                print(f"    [整合性チェック合格]")
+
             return shortened_text
         except Exception as e:
             print(f"    [再意訳エラー] {e}")
