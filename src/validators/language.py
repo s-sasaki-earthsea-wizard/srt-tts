@@ -29,6 +29,8 @@ LANG_CODE_MAP: dict[str, Language] = {
 ACCEPTABLE_LANGUAGES: dict[Language, set[Language]] = {
     # インドネシア語とマレー語は相互理解可能なほど近縁
     Language.INDONESIAN: {Language.MALAY},
+    # ヒンディー語とマラーティー語は同じデーヴァナーガリー文字を使い、語彙も近縁
+    Language.HINDI: {Language.MARATHI},
 }
 
 
