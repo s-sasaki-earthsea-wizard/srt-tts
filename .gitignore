@@ -17,3 +17,6 @@ __pycache__/
 # output
 output/*
 !output/.gitkeep
+
+# Sound files
+*.mp3
