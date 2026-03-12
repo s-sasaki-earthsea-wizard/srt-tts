@@ -187,7 +187,7 @@ class SubtitleProcessor:
                 )
 
             # 再意訳を依頼
-            text = self._shorten_text(
+            shortened_text = self._shorten_text(
                 text=text,
                 speed_ratio=speed_ratio,
                 retry=retry,
@@ -197,12 +197,14 @@ class SubtitleProcessor:
                 next_texts=next_texts,
             )
 
-            if text is None:
-                # エラー時は速度調整で続行
+            if shortened_text is None:
+                # エラー時は速度調整で続行（元のtextを保持）
                 return self._adjust_and_return(
                     subtitle, raw_audio_path, available_total, audio_duration,
                     temp_dir, text, available_start
                 )
+
+            text = shortened_text
 
         # ここには到達しないはずだが、念のため
         return (available_start, raw_audio_path, text)
