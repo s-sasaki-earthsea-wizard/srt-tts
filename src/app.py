@@ -363,20 +363,20 @@ def main() -> None:
     parser.add_argument(
         "--speed-threshold",
         type=float,
-        default=0.9,
-        help="速度調整の閾値（デフォルト: 0.9）。これ以下で再意訳を試行",
+        default=1.0,
+        help="速度調整の閾値（デフォルト: 1.0）。これ以下で再意訳を試行",
     )
     parser.add_argument(
         "--gtts-shorten-retries",
         type=int,
-        default=4,
-        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 4）",
+        default=6,
+        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 6）",
     )
     parser.add_argument(
         "--el-shorten-retries",
         type=int,
-        default=2,
-        help="ElevenLabs生成後の再意訳リトライ回数（デフォルト: 2）",
+        default=6,
+        help="ElevenLabs生成後の再意訳リトライ回数（デフォルト: 6）",
     )
     parser.add_argument(
         "--margin-ms",
