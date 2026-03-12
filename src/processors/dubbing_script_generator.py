@@ -179,9 +179,19 @@ class DubbingScriptGenerator:
         # ソーステキストのマッピングを作成（整合性確認用）
         source_texts = {sub.index: sub.text for sub in subtitles}
 
-        # LLMで翻訳
-        translated_entries = self._translate_with_llm(subtitles, target_lang)
-        logger.info(f"生成されたエントリー数: {len(translated_entries)}")
+        # LLMで翻訳（バリデーション失敗時は最大3回リトライ）
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                translated_entries = self._translate_with_llm(subtitles, target_lang)
+                logger.info(f"生成されたエントリー数: {len(translated_entries)}")
+                break
+            except ValueError as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Translation validation failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.info("Retrying translation...")
+                else:
+                    raise
 
         # gTTSで発話時間を見積もり（ソーステキストも渡す）
         estimated_entries = self._estimate_durations(
@@ -255,7 +265,19 @@ Please return the translated entries as a JSON object with the structure specifi
         if self.debug:
             logger.debug(f"LLMレスポンス:\n{json.dumps(response, ensure_ascii=False, indent=2)}")
 
-        return response.get("entries", [])
+        entries = response.get("entries", [])
+
+        # Validate that each entry has required keys
+        required_keys = {"start_ms", "end_ms", "text"}
+        for i, entry in enumerate(entries):
+            missing = required_keys - set(entry.keys())
+            if missing:
+                raise ValueError(
+                    f"Entry {i + 1} is missing required keys: {missing}. "
+                    f"Got: {entry}"
+                )
+
+        return entries
 
     def _estimate_durations(
         self,
