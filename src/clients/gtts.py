@@ -5,8 +5,13 @@ import tempfile
 from pathlib import Path
 
 from gtts import gTTS
+from pydub import AudioSegment
 
 from ..audio import get_audio_duration_ms
+
+# Length of the placeholder written for text that is empty after tag removal.
+# A 0-byte file cannot be decoded by ffmpeg when segments are combined later.
+EMPTY_TEXT_SILENCE_MS = 10
 
 
 # gTTSで非推奨警告が出る言語コードのマッピング
@@ -24,8 +29,10 @@ def _get_gtts_lang(lang: str) -> str:
 class GTTSEstimator:
     """gTTSを使用して音声長を見積もるクライアント"""
 
-    # ElevenLabsのオーディオタグを除去するための正規表現
-    AUDIO_TAG_PATTERN = re.compile(r"<[^>]+>")
+    # Strip ElevenLabs v3 audio tags ([laughs], [softly], ...) and any
+    # SSML-like <...> markup so gTTS does not read them aloud.
+    AUDIO_TAG_PATTERN = re.compile(r"\[[^\]]*\]|<[^>]+>")
+    MULTISPACE_PATTERN = re.compile(r"\s{2,}")
 
     def __init__(self, estimation_ratio: float = 0.9):
         """
@@ -45,7 +52,7 @@ class GTTSEstimator:
         Returns:
             タグが除去されたプレーンテキスト
         """
-        return self.AUDIO_TAG_PATTERN.sub("", text).strip()
+        return self.MULTISPACE_PATTERN.sub(" ", self.AUDIO_TAG_PATTERN.sub("", text)).strip()
 
     def estimate_duration_ms(self, text: str, lang: str = "ja") -> int:
         """
@@ -118,9 +125,10 @@ class GTTSEstimator:
         plain_text = self._strip_audio_tags(text)
 
         if not plain_text:
-            # 空のテキストの場合は空のファイルを作成
+            # Nothing to speak (e.g. "[music]"): write a short, decodable silence.
+            # The reported duration stays 0 ms because there is no speech.
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.touch()
+            AudioSegment.silent(duration=EMPTY_TEXT_SILENCE_MS).export(str(output_path), format="mp3")
             return (output_path, 0)
 
         # 音声を生成
