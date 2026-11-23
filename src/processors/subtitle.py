@@ -19,7 +19,7 @@ class SubtitleProcessor:
         audio_tag_processor: AudioTagProcessor | None,
         speed_threshold: float = 1.0,
         gtts_shorten_retries: int = 8,
-        el_shorten_retries: int = 2,
+        tts_shorten_retries: int = 2,
         margin_ms: int = 100,
         gtts_estimator: GTTSEstimator | None = None,
         lang: str = "ja",
@@ -32,7 +32,7 @@ class SubtitleProcessor:
             audio_tag_processor: オーディオタグプロセッサ（Noneの場合はタグ付けをスキップ）
             speed_threshold: 速度調整の閾値（これ以下で再意訳）
             gtts_shorten_retries: gTTS事前見積もりでの再意訳の最大リトライ回数
-            el_shorten_retries: ElevenLabs生成後の再意訳の最大リトライ回数
+            tts_shorten_retries: Max shortening retries after TTS synthesis (VoxCPM/ElevenLabs)
             margin_ms: エントリー間の最低マージン（ミリ秒）
             gtts_estimator: gTTSによる事前見積もりクライアント（Noneの場合はスキップ）
             lang: gTTSの言語コード（デフォルト: ja）
@@ -43,7 +43,7 @@ class SubtitleProcessor:
         self.audio_tag_processor = audio_tag_processor
         self.speed_threshold = speed_threshold
         self.gtts_shorten_retries = gtts_shorten_retries
-        self.el_shorten_retries = el_shorten_retries
+        self.tts_shorten_retries = tts_shorten_retries
         self.margin_ms = margin_ms
         self.gtts_estimator = gtts_estimator
         self.lang = lang
@@ -148,7 +148,7 @@ class SubtitleProcessor:
             next_texts=next_texts,
         )
 
-        for retry in range(self.el_shorten_retries + 1):
+        for retry in range(self.tts_shorten_retries + 1):
             # 音声を生成
             raw_audio_path = temp_dir / f"raw_{subtitle.index}.mp3"
             self.tts_client.synthesize(text, raw_audio_path)
@@ -175,7 +175,7 @@ class SubtitleProcessor:
                 )
 
             # 閾値を超えた場合
-            if retry == self.el_shorten_retries:
+            if retry == self.tts_shorten_retries:
                 # 最大リトライ回数到達: 警告を出して速度調整で続行
                 print(
                     f"    [警告] 最大リトライ回数到達 "
@@ -191,7 +191,7 @@ class SubtitleProcessor:
                 text=text,
                 speed_ratio=speed_ratio,
                 retry=retry,
-                max_retries=self.el_shorten_retries,
+                max_retries=self.tts_shorten_retries,
                 subtitle=subtitle,
                 prev_texts=prev_texts,
                 next_texts=next_texts,
@@ -384,9 +384,9 @@ class SubtitleProcessor:
         """
         gTTSで事前見積もりを行い、必要なら短縮を行う
 
-        ElevenLabsを呼ぶ前にgTTS（無料）で音声長を見積もり、
-        時間内に収まらない場合は先に短縮を行うことで、
-        ElevenLabsのクレジット消費を抑える。
+        Estimate the duration with gTTS (free and fast) before calling the TTS
+        engine, and shorten first when it will not fit. This saves ElevenLabs
+        credits and VoxCPM generation time.
 
         Args:
             text: 処理対象のテキスト
