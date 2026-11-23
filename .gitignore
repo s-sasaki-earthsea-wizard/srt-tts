@@ -24,3 +24,6 @@ output/*
 voices/**
 !voices/**/
 !voices/**/.gitkeep
+
+# uv virtual environment
+.venv/

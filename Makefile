@@ -1,7 +1,14 @@
-.PHONY: build rebuild run run-dir dub dub-audio synth clean help
+.PHONY: setup build rebuild run run-dir dub dub-audio synth clean help
 .DEFAULT_GOAL := help
 
 IMAGE_NAME := srt-tts
+
+# LANG doubles as the shell locale variable (e.g. C.UTF-8), so `ifndef LANG`
+# alone never fires. Reject locale-looking values explicitly.
+check_lang = $(if $(findstring .,$(LANG)),$(error LANG looks like a shell locale ($(LANG)); pass a language code, e.g. LANG=en))
+
+setup: ## uvで依存パッケージをインストール
+	uv sync
 
 build: ## Dockerイメージをビルド
 	docker compose build
@@ -16,10 +23,11 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make run SRT=srt/example.srt LANG=ja (ja, en, ko, zh-CN, etc.))
 endif
+	$(check_lang)
 ifdef JSON_ONLY
-	docker compose run --rm srt-tts python -m src.app /app/$(SRT) --lang $(LANG) --json-only $(ARGS)
+	uv run python -m src.app $(SRT) --lang $(LANG) --json-only $(ARGS)
 else
-	docker compose run --rm srt-tts python -m src.app /app/$(SRT) --lang $(LANG) $(ARGS)
+	uv run python -m src.app $(SRT) --lang $(LANG) $(ARGS)
 endif
 
 run-dir: ## ディレクトリ内の全SRTファイルを音声化 (DIR=<path> [ARGS=...])
@@ -34,7 +42,7 @@ endif
 			echo "========================================"; \
 			echo "処理中: $$file (言語: $$lang)"; \
 			echo "========================================"; \
-			docker compose run --rm srt-tts python -m src.app /app/$$file --lang $$lang $(ARGS); \
+			uv run python -m src.app $$file --lang $$lang $(ARGS); \
 		fi \
 	done
 	@echo ""
@@ -47,7 +55,8 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make dub SRT=srt/example-jp.srt LANG=en)
 endif
-	docker compose run --rm srt-tts python -m src.dub /app/$(SRT) --lang $(LANG) $(ARGS)
+	$(check_lang)
+	uv run python -m src.dub $(SRT) --lang $(LANG) $(ARGS)
 
 dub-audio: ## 日本語SRTから吹き替え用SRT+音声を生成 (SRT=<path> LANG=<code> [ARGS=...])
 ifndef SRT
@@ -56,7 +65,8 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make dub-audio SRT=srt/example-jp.srt LANG=en)
 endif
-	docker compose run --rm srt-tts python -m src.dub /app/$(SRT) --lang $(LANG) --gtts-only $(ARGS)
+	$(check_lang)
+	uv run python -m src.dub $(SRT) --lang $(LANG) --gtts-only $(ARGS)
 
 synth: ## 既存SRTからgTTSで音声を生成 (SRT=<path> LANG=<code> [ARGS=...])
 ifndef SRT
@@ -65,7 +75,8 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make synth SRT=srt/example-en.srt LANG=en)
 endif
-	docker compose run --rm srt-tts python -m src.synth /app/$(SRT) --lang $(LANG) $(ARGS)
+	$(check_lang)
+	uv run python -m src.synth $(SRT) --lang $(LANG) $(ARGS)
 
 clean: ## Dockerイメージを削除
 	docker rmi $(IMAGE_NAME) || true
