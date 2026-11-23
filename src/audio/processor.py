@@ -1,14 +1,23 @@
 """音声処理機能を提供するモジュール"""
 
+import subprocess
 from pathlib import Path
 
 from pydub import AudioSegment
 
 
 def get_audio_duration_ms(audio_path: str | Path) -> int:
-    """音声ファイルの長さをミリ秒で取得する"""
-    audio = AudioSegment.from_file(str(audio_path))
-    return len(audio)
+    """音声ファイルの長さをミリ秒で取得する（ffprobeベース、メモリ効率的）"""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "quiet",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(audio_path),
+        ],
+        capture_output=True, text=True,
+    )
+    return int(float(result.stdout.strip()) * 1000)
 
 
 def adjust_audio_speed(audio_path: str | Path, target_duration_ms: int, output_path: str | Path) -> Path:

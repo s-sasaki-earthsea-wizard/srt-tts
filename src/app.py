@@ -11,7 +11,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .audio import combine_audio_segments
-from .clients import GTTSEstimator, LLMClient, TTSClient
+from .clients import ElevenLabsClient, GTTSEstimator, LLMClient, TTSClient, VoxCPMClient
 from .parsers import Subtitle, parse_srt, write_srt
 from .processors import AudioTagProcessor, SubtitleProcessor
 from .validators import ConsistencyValidator
@@ -20,6 +20,26 @@ logger = logging.getLogger(__name__)
 
 # 前後何エントリーをコンテキストとして使用するか
 CONTEXT_WINDOW = 2
+
+TTS_PROVIDERS = ("voxcpm", "elevenlabs")
+DEFAULT_TTS_PROVIDER = "voxcpm"
+
+
+def create_tts_client(provider: str, lang: str) -> TTSClient:
+    """Create the TTS client for the given provider.
+
+    Args:
+        provider: One of TTS_PROVIDERS.
+        lang: Language code (VoxCPM uses it to pick the reference voice).
+
+    Returns:
+        A client implementing TTSClient.
+    """
+    if provider == "voxcpm":
+        return VoxCPMClient(lang=lang)
+    if provider == "elevenlabs":
+        return ElevenLabsClient()
+    raise ValueError(f"Unknown TTS provider: {provider}")
 
 
 def save_tagged_json(
@@ -84,13 +104,14 @@ def save_tagged_json(
 def process_srt_file(
     srt_path: Path,
     output_path: Path,
-    use_audio_tags: bool = True,
+    use_audio_tags: bool = False,
     json_only: bool = False,
     gtts_only: bool = False,
+    tts_provider: str = DEFAULT_TTS_PROVIDER,
     debug: bool = False,
     speed_threshold: float = 1.0,
     gtts_shorten_retries: int = 8,
-    el_shorten_retries: int = 2,
+    tts_shorten_retries: int = 2,
     margin_ms: int = 100,
     estimation_ratio: float | None = 0.9,
     lang: str = "ja",
@@ -103,13 +124,14 @@ def process_srt_file(
     Args:
         srt_path: 入力SRTファイルのパス
         output_path: 出力音声ファイルのパス
-        use_audio_tags: オーディオタグを使用するか
+        use_audio_tags: Insert ElevenLabs audio tags with the LLM (off by default)
         json_only: TTSをスキップしてJSONのみ出力するか
-        gtts_only: gTTSのみで音声生成（ElevenLabsを使用しない）
+        gtts_only: Synthesize with gTTS only (no VoxCPM or ElevenLabs)
+        tts_provider: TTS engine for the normal mode ("voxcpm" or "elevenlabs")
         debug: デバッグモードを有効にするか（詳細ログ出力）
         speed_threshold: 速度調整の閾値（これ以下で再意訳）
         gtts_shorten_retries: gTTS事前見積もりでの再意訳の最大リトライ回数
-        el_shorten_retries: ElevenLabs生成後の再意訳の最大リトライ回数
+        tts_shorten_retries: Max shortening retries after TTS synthesis
         margin_ms: エントリー間の最低マージン（ミリ秒）
         estimation_ratio: gTTS事前見積もりの補正係数（Noneで無効化）
         lang: gTTSの言語コード（デフォルト: ja）
@@ -121,10 +143,11 @@ def process_srt_file(
     print(f"オーディオタグ使用: {use_audio_tags}")
     print(f"JSONのみ: {json_only}")
     print(f"gTTSのみ: {gtts_only}")
+    print(f"TTS provider: {'gtts' if gtts_only else tts_provider}")
     print(f"デバッグモード: {debug}")
     print(f"速度調整閾値: {speed_threshold}")
     print(f"gTTS短縮リトライ回数: {gtts_shorten_retries}"
-          f", ElevenLabs短縮リトライ回数: {el_shorten_retries}")
+          f", TTS shorten retries: {tts_shorten_retries}")
     print(f"エントリー間マージン: {margin_ms}ms")
     print(f"gTTS事前見積もり: {f'有効 (補正係数: {estimation_ratio})' if estimation_ratio else '無効'}")
     print(f"gTTS言語: {lang}")
@@ -138,30 +161,39 @@ def process_srt_file(
     # TTSクライアントを初期化（json_onlyまたはgtts_onlyの場合はスキップ）
     tts_client = None
     if not json_only and not gtts_only:
-        tts_client = TTSClient()
-        print("[TTS] クライアント初期化完了")
+        tts_client = create_tts_client(tts_provider, lang)
+        print(f"[TTS] {tts_provider} client ready")
 
-    # オーディオタグプロセッサと意味一貫性バリデーターを初期化
+    if use_audio_tags and (gtts_only or tts_provider != "elevenlabs"):
+        print(
+            "[Warning] Audio tags are ElevenLabs-specific. They are stripped before "
+            "synthesis with VoxCPM/gTTS, so --tags only adds LLM cost here."
+        )
+
+    # Initialize the LLM text processor and the consistency validator.
+    # The LLM is needed for shortening even when audio tags are disabled.
     audio_tag_processor = None
     consistency_validator = None
-    if use_audio_tags:
-        try:
-            llm_client = LLMClient()
-            audio_tag_processor = AudioTagProcessor(
-                llm_client, debug=debug, target_lang=lang
-            )
-            print(f"[LLM] オーディオタグプロセッサ初期化完了（言語バリデーション: {lang}）")
+    try:
+        llm_client = LLMClient()
+        audio_tag_processor = AudioTagProcessor(
+            llm_client, debug=debug, target_lang=lang, use_tags=use_audio_tags
+        )
+        print(
+            f"[LLM] Text processor ready (audio tags: {'on' if use_audio_tags else 'off'}, "
+            f"language validation: {lang})"
+        )
 
-            if consistency_check:
-                consistency_validator = ConsistencyValidator(
-                    llm_client, debug=debug
-                )
-                print("[LLM] 意味一貫性バリデーター初期化完了")
-        except ValueError as e:
-            print(f"[LLM] オーディオタグ無効: {e}")
-        except Exception as e:
-            print(f"[LLM] 初期化エラー: {e}")
-            traceback.print_exc()
+        if consistency_check:
+            consistency_validator = ConsistencyValidator(
+                llm_client, debug=debug
+            )
+            print("[LLM] 意味一貫性バリデーター初期化完了")
+    except ValueError as e:
+        print(f"[LLM] Disabled (no audio tags or shortening): {e}")
+    except Exception as e:
+        print(f"[LLM] Initialization error: {e}")
+        traceback.print_exc()
 
     # gTTSクライアントを初期化（gtts_onlyまたは事前見積もり用）
     gtts_estimator = None
@@ -179,7 +211,7 @@ def process_srt_file(
         audio_tag_processor=audio_tag_processor,
         speed_threshold=speed_threshold,
         gtts_shorten_retries=gtts_shorten_retries,
-        el_shorten_retries=el_shorten_retries,
+        tts_shorten_retries=tts_shorten_retries,
         margin_ms=margin_ms,
         gtts_estimator=gtts_estimator,
         lang=lang,
@@ -212,7 +244,7 @@ def process_srt_file(
             tagged_texts.append(tagged_text)
 
     elif gtts_only:
-        # gTTSのみモード：ElevenLabsを使わずgTTSで音声生成
+        # gTTS-only mode: synthesize with gTTS instead of VoxCPM/ElevenLabs
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
@@ -225,7 +257,7 @@ def process_srt_file(
 
                 # オーディオタグを付与
                 text = subtitle.text
-                if audio_tag_processor:
+                if audio_tag_processor and audio_tag_processor.use_tags:
                     try:
                         tagged_text = audio_tag_processor.add_tags(
                             text,
@@ -346,9 +378,15 @@ def main() -> None:
         help="出力ファイルのパス（省略時は入力ファイル名.mp3/.json）",
     )
     parser.add_argument(
-        "--no-tags",
+        "--tags",
         action="store_true",
-        help="オーディオタグの付与をスキップする",
+        help="Insert ElevenLabs audio tags with the LLM (off by default; only useful with --tts-provider elevenlabs)",
+    )
+    parser.add_argument(
+        "--tts-provider",
+        choices=TTS_PROVIDERS,
+        default=DEFAULT_TTS_PROVIDER,
+        help=f"TTS engine (default: {DEFAULT_TTS_PROVIDER}). voxcpm runs locally on Apple Silicon; elevenlabs is the paid API",
     )
     parser.add_argument(
         "--json-only",
@@ -363,20 +401,20 @@ def main() -> None:
     parser.add_argument(
         "--speed-threshold",
         type=float,
-        default=0.9,
-        help="速度調整の閾値（デフォルト: 0.9）。これ以下で再意訳を試行",
+        default=1.0,
+        help="速度調整の閾値（デフォルト: 1.0）。これ以下で再意訳を試行",
     )
     parser.add_argument(
         "--gtts-shorten-retries",
         type=int,
-        default=4,
-        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 4）",
+        default=6,
+        help="gTTS事前見積もりでの再意訳リトライ回数（デフォルト: 6）",
     )
     parser.add_argument(
-        "--el-shorten-retries",
+        "--tts-shorten-retries",
         type=int,
-        default=2,
-        help="ElevenLabs生成後の再意訳リトライ回数（デフォルト: 2）",
+        default=6,
+        help="Shortening retries after TTS synthesis (default: 6)",
     )
     parser.add_argument(
         "--margin-ms",
@@ -393,7 +431,7 @@ def main() -> None:
     parser.add_argument(
         "--gtts-only",
         action="store_true",
-        help="gTTSのみで音声生成（ElevenLabsを使用しない）",
+        help="Synthesize with gTTS only (no VoxCPM or ElevenLabs)",
     )
     parser.add_argument(
         "--lang",
@@ -440,13 +478,14 @@ def main() -> None:
     process_srt_file(
         input_path,
         output_path,
-        use_audio_tags=not args.no_tags,
+        use_audio_tags=args.tags,
         json_only=args.json_only,
         gtts_only=args.gtts_only,
+        tts_provider=args.tts_provider,
         debug=args.debug,
         speed_threshold=args.speed_threshold,
         gtts_shorten_retries=args.gtts_shorten_retries,
-        el_shorten_retries=args.el_shorten_retries,
+        tts_shorten_retries=args.tts_shorten_retries,
         margin_ms=args.margin_ms,
         estimation_ratio=estimation_ratio,
         lang=args.lang,

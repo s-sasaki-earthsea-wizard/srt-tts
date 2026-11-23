@@ -9,16 +9,28 @@ logger = logging.getLogger(__name__)
 
 
 class AudioTagProcessor:
-    """LLMを使用してテキストにオーディオタグを付与するプロセッサ"""
+    """LLM-based processor that adds audio tags to and shortens subtitle text.
+
+    With ``use_tags=False`` no tags are added and shortening uses a tag-free
+    prompt, so TTS engines that do not understand ElevenLabs audio tags
+    (e.g. VoxCPM) can still use LLM shortening.
+    """
 
     def __init__(
-        self, llm_client: LLMClient, debug: bool = False, target_lang: str | None = None
+        self,
+        llm_client: LLMClient,
+        debug: bool = False,
+        target_lang: str | None = None,
+        use_tags: bool = True,
     ):
         self.llm_client = llm_client
         self.debug = debug
         self.target_lang = target_lang
+        self.use_tags = use_tags
         self.system_prompt = load_prompt("audio_tag_system")
-        self.shorten_prompt = load_prompt("shorten_text_system")
+        self.shorten_prompt = load_prompt(
+            "shorten_text_system" if use_tags else "shorten_text_plain_system"
+        )
 
         # リトライ機能付きLLMクライアント
         self.retry_client = LLMRetryClient(llm_client, target_lang)
@@ -101,18 +113,17 @@ class AudioTagProcessor:
         next_texts: list[str] | None = None,
         entry_index: int | None = None,
     ) -> str:
-        """
-        テキストを指定比率に短縮し、オーディオタグも付与する
+        """Shorten text to the target ratio, adding audio tags if use_tags is True.
 
         Args:
-            text: 元のテキスト（短縮対象）
-            target_ratio: 目標短縮率（0.7 = 70%に短縮）
-            prev_texts: 前のエントリーのテキストリスト（最大2つ）
-            next_texts: 次のエントリーのテキストリスト（最大2つ）
-            entry_index: エントリーのインデックス（ログ用）
+            text: Text to shorten.
+            target_ratio: Target length ratio (0.7 means 70% of the original).
+            prev_texts: Previous entries for context (up to 2).
+            next_texts: Next entries for context (up to 2).
+            entry_index: Entry index, used for logging.
 
         Returns:
-            短縮されたテキスト（オーディオタグ付き）
+            Shortened text (with audio tags only when use_tags is True).
         """
         # コンテキストを構築
         context_parts = []

@@ -1,13 +1,12 @@
-.PHONY: build rebuild run run-dir dub dub-audio synth clean help
+.PHONY: setup run run-dir dub dub-audio synth help
 .DEFAULT_GOAL := help
 
-IMAGE_NAME := srt-tts
+# LANG doubles as the shell locale variable (e.g. C.UTF-8), so `ifndef LANG`
+# alone never fires. Reject locale-looking values explicitly.
+check_lang = $(if $(findstring .,$(LANG)),$(error LANG looks like a shell locale ($(LANG)); pass a language code, e.g. LANG=en))
 
-build: ## Dockerイメージをビルド
-	docker compose build
-
-rebuild: ## Dockerイメージをキャッシュなしで再ビルド
-	docker compose build --no-cache
+setup: ## uvで依存パッケージをインストール
+	uv sync
 
 run: ## SRTファイルを音声化 (SRT=<path> LANG=<code> [JSON_ONLY=1] [ARGS=...])
 ifndef SRT
@@ -16,10 +15,11 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make run SRT=srt/example.srt LANG=ja (ja, en, ko, zh-CN, etc.))
 endif
+	$(check_lang)
 ifdef JSON_ONLY
-	docker compose run --rm srt-tts python -m src.app /app/$(SRT) --lang $(LANG) --json-only $(ARGS)
+	uv run python -m src.app $(SRT) --lang $(LANG) --json-only $(ARGS)
 else
-	docker compose run --rm srt-tts python -m src.app /app/$(SRT) --lang $(LANG) $(ARGS)
+	uv run python -m src.app $(SRT) --lang $(LANG) $(ARGS)
 endif
 
 run-dir: ## ディレクトリ内の全SRTファイルを音声化 (DIR=<path> [ARGS=...])
@@ -34,7 +34,7 @@ endif
 			echo "========================================"; \
 			echo "処理中: $$file (言語: $$lang)"; \
 			echo "========================================"; \
-			docker compose run --rm srt-tts python -m src.app /app/$$file --lang $$lang $(ARGS); \
+			uv run python -m src.app $$file --lang $$lang $(ARGS); \
 		fi \
 	done
 	@echo ""
@@ -47,7 +47,8 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make dub SRT=srt/example-jp.srt LANG=en)
 endif
-	docker compose run --rm srt-tts python -m src.dub /app/$(SRT) --lang $(LANG) $(ARGS)
+	$(check_lang)
+	uv run python -m src.dub $(SRT) --lang $(LANG) $(ARGS)
 
 dub-audio: ## 日本語SRTから吹き替え用SRT+音声を生成 (SRT=<path> LANG=<code> [ARGS=...])
 ifndef SRT
@@ -56,7 +57,8 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make dub-audio SRT=srt/example-jp.srt LANG=en)
 endif
-	docker compose run --rm srt-tts python -m src.dub /app/$(SRT) --lang $(LANG) --gtts-only $(ARGS)
+	$(check_lang)
+	uv run python -m src.dub $(SRT) --lang $(LANG) --gtts-only $(ARGS)
 
 synth: ## 既存SRTからgTTSで音声を生成 (SRT=<path> LANG=<code> [ARGS=...])
 ifndef SRT
@@ -65,13 +67,11 @@ endif
 ifndef LANG
 	$(error LANG is required. Usage: make synth SRT=srt/example-en.srt LANG=en)
 endif
-	docker compose run --rm srt-tts python -m src.synth /app/$(SRT) --lang $(LANG) $(ARGS)
-
-clean: ## Dockerイメージを削除
-	docker rmi $(IMAGE_NAME) || true
+	$(check_lang)
+	uv run python -m src.synth $(SRT) --lang $(LANG) $(ARGS)
 
 help: ## ヘルプを表示
-	@echo "SRT-TTS - SRTファイルをElevenLabs APIで音声化"
+	@echo "SRT-TTS - SRTファイルを音声化 (既定: ローカルのVoxCPM2、オプション: ElevenLabs / gTTS)"
 	@echo ""
 	@echo "使用可能なコマンド:"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -83,20 +83,27 @@ help: ## ヘルプを表示
 	@echo "  JSON_ONLY    1を指定するとTTSをスキップしてJSONのみ出力"
 	@echo "  ARGS         追加の引数 (例: --gtts-only)"
 	@echo ""
+	@echo "参照音声 (VoxCPM):"
+	@echo "  voices/<lang>/reference.{wav,mp3,flac} と reference.txt (書き起こし) を置くと声を複製"
+	@echo "  zh-CN や pt-BR は voices/zh, voices/pt にフォールバック。参照音声がなければ毎回声が変わりうる"
+	@echo ""
 	@echo "追加オプション (ARGSで指定):"
-	@echo "  --gtts-only                    gTTSのみで音声生成 (ElevenLabsを使用しない)"
+	@echo "  --tts-provider <name>          音声合成エンジン: voxcpm (既定、ローカル) / elevenlabs (有料API)"
+	@echo "  --tags                         LLMでElevenLabs用オーディオタグを付与 (既定: 無効)"
+	@echo "  --gtts-only                    gTTSのみで音声生成 (VoxCPM/ElevenLabsを使用しない)"
 	@echo "  --estimation-ratio <float>     gTTS事前見積もりの補正係数 (デフォルト: 1.0、0以下で無効)"
-	@echo "  --gtts-shorten-retries <int>   gTTS事前見積もりでの再意訳リトライ回数 (デフォルト: 4)"
-	@echo "  --el-shorten-retries <int>     ElevenLabs生成後の再意訳リトライ回数 (デフォルト: 2)"
-	@echo "  --speed-threshold <float>      速度調整の閾値 (デフォルト: 0.9)"
+	@echo "  --gtts-shorten-retries <int>   gTTS事前見積もりでの再意訳リトライ回数 (デフォルト: 6)"
+	@echo "  --tts-shorten-retries <int>    音声合成後の再意訳リトライ回数 (デフォルト: 6)"
+	@echo "  --speed-threshold <float>      速度調整の閾値 (デフォルト: 1.0)"
 	@echo "  --shorten-ratio <float>        文字数削減の目標係数 (デフォルト: 0.95)"
 	@echo "  --margin-ms <int>              エントリー間マージン (デフォルト: 100ms)"
 	@echo ""
 	@echo "使用例:"
-	@echo "  make build"
+	@echo "  make setup"
 	@echo "  make run SRT=srt/example.srt LANG=ja"
 	@echo "  make run SRT=srt/example.srt LANG=en"
 	@echo "  make run SRT=srt/example.srt LANG=ja JSON_ONLY=1"
+	@echo "  make run SRT=srt/example.srt LANG=en ARGS='--tts-provider elevenlabs --tags'"
 	@echo "  make run SRT=srt/example.srt LANG=en ARGS='--gtts-only'"
 	@echo "  make run-dir DIR=srt/AI-weather-forecast"
 	@echo "  make run-dir DIR=srt/AI-weather-forecast ARGS='--gtts-only'"

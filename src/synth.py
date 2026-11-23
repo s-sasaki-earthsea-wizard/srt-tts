@@ -41,8 +41,8 @@ def main() -> None:
     parser.add_argument(
         "--speed-threshold",
         type=float,
-        default=0.9,
-        help="速度調整の閾値（デフォルト: 0.9）",
+        default=1.0,
+        help="速度調整の閾値（デフォルト: 1.0）",
     )
     parser.add_argument(
         "--debug",

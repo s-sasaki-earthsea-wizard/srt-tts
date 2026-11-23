@@ -2,13 +2,14 @@
 
 ## プロジェクト概要
 
-SRTファイルをElevenLabs APIで音声化するツール。LLMを使用してオーディオタグを自動付与し、より表現豊かな音声を生成する。
+SRTファイルを音声化するツール。既定はローカルのVoxCPM2（MLX 4bit版、Apple Silicon）で、ElevenLabs APIとgTTSも選べる。時間枠に収まらない字幕はLLMで短縮する。ElevenLabs向けにはLLMでオーディオタグも付与できる。
 
 ### 技術スタック
 
-- Python 3.11+
-- Docker / Docker Compose
-- ElevenLabs TTS API (v3)
+- Python 3.12（3.11以上3.13未満。pydubが3.13で削除されたaudioopに依存）
+- uv（`pyproject.toml` / `uv.lock`、ホストで実行。Dockerは廃止）
+- VoxCPM2（`mlx-community/VoxCPM2-4bit`、mlx-audio 0.6.7、Apple SiliconのMetalで推論）
+- ElevenLabs TTS API (v3、オプション)
 - OpenAI互換 LLM API
 - gTTS（Google Text-to-Speech）
 - pydub（音声処理）
@@ -24,15 +25,13 @@ SRTファイル
     ↓
 [SRTパーサー] タイムスタンプ・テキスト抽出
     ↓
-[LLM] オーディオタグ付与（前後2エントリーのコンテキスト参照）
+[LLM] オーディオタグ付与（--tags 指定時のみ、前後2エントリーのコンテキスト参照）
     ↓
-[言語バリデーション] 出力言語が不一致なら再生成（最大3回リトライ）
+[gTTS] 事前見積もり → 時間超過ならLLMで短縮を試行（言語バリデーション・意味一貫性チェック付き）
     ↓
-[gTTS] 事前見積もり → 時間超過なら最大4回まで短縮を試行（意味一貫性チェック付き）
+[TTS] VoxCPM2（既定、voices/<lang>/ の参照音声で声を複製）または ElevenLabs で音声合成
     ↓
-[ElevenLabs TTS] 音声合成
-    ↓
-[音声処理] 時間超過なら最大2回まで短縮を試行（意味一貫性チェック付き） → それでも超過なら速度調整
+[音声処理] 時間超過なら短縮を再試行（意味一貫性チェック付き） → それでも超過なら速度調整
     ↓
 [音声結合] 最終MP3ファイル生成
 ```
@@ -114,13 +113,19 @@ SRTファイル
 - 📝 update: 更新・改善
 - 🗑️ remove: 削除
 
-**重要**: Claude Codeを使用してコミットする場合は、必ず以下の署名を含める：
+**重要**: AI の支援を受けた成果物には、**AI の支援を受けたことだけ**を明記する。製品名やモデル名は書かない（すぐ変わるため）。
 
-```text
-🤖 Generated with [Claude Code](https://claude.ai/code)
+- コミットメッセージの末尾に、次の trailer を入れる
 
-Co-Authored-By: Claude <noreply@anthropic.com>
-```
+  ```text
+  Assisted-by: AI
+  ```
+
+- PR 本文の末尾に、次の1行を入れる
+
+  ```text
+  This PR was developed with AI assistance.
+  ```
 
 ## 実装状況
 
@@ -135,7 +140,6 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - [x] コンテキストウィンドウ（前後2エントリー参照）
 - [x] タグ付きテキストのJSON出力
 - [x] JSON-onlyモード（開発用）
-- [x] Dockerボリュームマウント（開発用）
 - [x] gTTSによる事前見積もり（ElevenLabsクレジット節約）
 - [x] gTTS-onlyモード（ElevenLabs不使用での音声生成）
 - [x] 多言語対応（--lang オプション）
@@ -149,12 +153,17 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - [x] 再翻訳機能（時間枠に収まらない場合のLLMによる短縮）
 - [x] 再翻訳時の整合性確認（LLMによる意味保持チェック）
 - [x] 既存SRTからの音声合成（synth機能）
+- [x] uvによるホスト環境への移行（Docker廃止）
+- [x] VoxCPM2（MLX 4bit）によるローカル音声合成を既定に（ElevenLabsはオプション）
+- [x] 参照音声による声の複製（`voices/<lang>/`、書き起こしがあれば書き起こし付きで複製）
+- [x] オーディオタグを既定で無効化（--tags で有効化）、LLM短縮をタグ付与から分離
 
 ## Makeターゲット
 
 | ターゲット | 説明 |
 | --- | --- |
-| `run` | SRTファイルを音声化（ElevenLabs/gTTS） |
+| `setup` | uvで依存パッケージをインストール（`uv sync`） |
+| `run` | SRTファイルを音声化（VoxCPM2/ElevenLabs/gTTS） |
 | `run-dir` | ディレクトリ内の全SRTファイルを音声化 |
 | `dub` | 日本語SRTから吹き替え用SRTを生成 |
 | `dub-audio` | 日本語SRTから吹き替え用SRT+音声を生成 |
@@ -166,15 +175,16 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
+| `--tts-provider` | voxcpm | 音声合成エンジン（voxcpm / elevenlabs） |
+| `--tags` | - | LLMでElevenLabs用オーディオタグを付与（既定は無効） |
 | `--gtts-only` | - | gTTSのみで音声生成 |
-| `--lang` | ja | gTTSの言語コード |
+| `--lang` | ja | 言語コード（gTTS・VoxCPM参照音声・言語バリデーション） |
 | `--estimation-ratio` | 1.0 | gTTS事前見積もりの補正係数 |
-| `--gtts-shorten-retries` | 4 | gTTS事前見積もりでの再意訳リトライ回数 |
-| `--el-shorten-retries` | 2 | ElevenLabs生成後の再意訳リトライ回数 |
-| `--speed-threshold` | 0.9 | 速度調整の閾値 |
+| `--gtts-shorten-retries` | 6 | gTTS事前見積もりでの再意訳リトライ回数 |
+| `--tts-shorten-retries` | 6 | 音声合成後の再意訳リトライ回数 |
+| `--speed-threshold` | 1.0 | 速度調整の閾値 |
 | `--shorten-ratio` | 0.95 | 文字数削減の目標係数 |
 | `--margin-ms` | 100 | エントリー間の最低マージン（ミリ秒） |
-| `--no-tags` | - | オーディオタグの付与をスキップ |
 | `--no-consistency-check` | - | 短縮テキストの意味一貫性チェックを無効化 |
 | `--json-only` | - | TTSをスキップしてJSONのみ出力 |
 | `--debug` | - | デバッグモードを有効化 |
@@ -188,7 +198,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 | `--estimation-ratio` | 1.0 | gTTS見積もりの補正係数 |
 | `--retranslation-retries` | 2 | 再翻訳のリトライ回数 |
 | `--gtts-only` | - | gTTSで音声ファイルも生成 |
-| `--speed-threshold` | 0.9 | 速度調整の閾値 |
+| `--speed-threshold` | 1.0 | 速度調整の閾値 |
 | `--debug` | - | デバッグモードを有効化 |
 
 ### 音声合成（src/synth.py）
@@ -196,5 +206,5 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 | オプション | デフォルト | 説明 |
 | --- | --- | --- |
 | `--lang` | (必須) | 言語コード |
-| `--speed-threshold` | 0.9 | 速度調整の閾値 |
+| `--speed-threshold` | 1.0 | 速度調整の閾値 |
 | `--debug` | - | デバッグモードを有効化 |

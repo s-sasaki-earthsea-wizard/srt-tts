@@ -1,0 +1,22 @@
+[project]
+name = "srt-tts"
+version = "0.1.0"
+description = "Synthesize timed speech from SRT subtitles"
+readme = "README.md"
+# pydub relies on audioop, which was removed from the stdlib in Python 3.13.
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "gTTS==2.5.4",
+    "lingua-language-detector==2.1.0",
+    # Local VoxCPM2 TTS (MLX). Apple Silicon only; other platforms can still
+    # use the ElevenLabs and gTTS paths.
+    "mlx-audio[tts]==0.6.7; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "pydub==0.25.1",
+    "pysrt==1.1.2",
+    "python-dotenv==1.0.1",
+    "requests==2.34.2",
+]
+
+[tool.uv]
+# Run as `python -m src.<module>`; no need to build/install the project itself.
+package = false

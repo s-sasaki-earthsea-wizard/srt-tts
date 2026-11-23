@@ -6,7 +6,7 @@ from pathlib import Path
 import requests
 
 
-class TTSClient:
+class ElevenLabsClient:
     """ElevenLabs TTS APIクライアント"""
 
     def __init__(self):
