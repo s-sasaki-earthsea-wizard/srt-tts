@@ -149,7 +149,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 - [x] 既存SRTからの音声合成（synth機能）
 - [x] uvによるホスト環境への移行（Docker廃止）
 - [x] VoxCPM2（MLX 4bit）によるローカル音声合成を既定に（ElevenLabsはオプション）
-- [x] 参照音声による声の複製（voices/<lang>/、書き起こしがあれば書き起こし付きで複製）
+- [x] 参照音声による声の複製（`voices/<lang>/`、書き起こしがあれば書き起こし付きで複製）
 - [x] オーディオタグを既定で無効化（--tags で有効化）、LLM短縮をタグ付与から分離
 
 ## Makeターゲット
