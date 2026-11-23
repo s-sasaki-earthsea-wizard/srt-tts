@@ -141,27 +141,30 @@ def process_srt_file(
         tts_client = TTSClient()
         print("[TTS] クライアント初期化完了")
 
-    # オーディオタグプロセッサと意味一貫性バリデーターを初期化
+    # Initialize the LLM text processor and the consistency validator.
+    # The LLM is needed for shortening even when audio tags are disabled.
     audio_tag_processor = None
     consistency_validator = None
-    if use_audio_tags:
-        try:
-            llm_client = LLMClient()
-            audio_tag_processor = AudioTagProcessor(
-                llm_client, debug=debug, target_lang=lang
-            )
-            print(f"[LLM] オーディオタグプロセッサ初期化完了（言語バリデーション: {lang}）")
+    try:
+        llm_client = LLMClient()
+        audio_tag_processor = AudioTagProcessor(
+            llm_client, debug=debug, target_lang=lang, use_tags=use_audio_tags
+        )
+        print(
+            f"[LLM] Text processor ready (audio tags: {'on' if use_audio_tags else 'off'}, "
+            f"language validation: {lang})"
+        )
 
-            if consistency_check:
-                consistency_validator = ConsistencyValidator(
-                    llm_client, debug=debug
-                )
-                print("[LLM] 意味一貫性バリデーター初期化完了")
-        except ValueError as e:
-            print(f"[LLM] オーディオタグ無効: {e}")
-        except Exception as e:
-            print(f"[LLM] 初期化エラー: {e}")
-            traceback.print_exc()
+        if consistency_check:
+            consistency_validator = ConsistencyValidator(
+                llm_client, debug=debug
+            )
+            print("[LLM] 意味一貫性バリデーター初期化完了")
+    except ValueError as e:
+        print(f"[LLM] Disabled (no audio tags or shortening): {e}")
+    except Exception as e:
+        print(f"[LLM] Initialization error: {e}")
+        traceback.print_exc()
 
     # gTTSクライアントを初期化（gtts_onlyまたは事前見積もり用）
     gtts_estimator = None
@@ -225,7 +228,7 @@ def process_srt_file(
 
                 # オーディオタグを付与
                 text = subtitle.text
-                if audio_tag_processor:
+                if audio_tag_processor and audio_tag_processor.use_tags:
                     try:
                         tagged_text = audio_tag_processor.add_tags(
                             text,

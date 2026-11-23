@@ -76,8 +76,8 @@ class SubtitleProcessor:
         """
         text = subtitle.text
 
-        # オーディオタグを付与
-        if self.audio_tag_processor:
+        # Add audio tags (when tags are disabled the LLM is used for shortening only)
+        if self.audio_tag_processor and self.audio_tag_processor.use_tags:
             try:
                 tagged_text = self.audio_tag_processor.add_tags(
                     text,
