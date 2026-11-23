@@ -20,3 +20,7 @@ output/*
 
 # Sound files
 *.mp3
+# Reference voices (keep directory structure only)
+voices/**
+!voices/**/
+!voices/**/.gitkeep
