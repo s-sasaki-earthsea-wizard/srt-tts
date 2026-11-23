@@ -1,7 +1,5 @@
-.PHONY: setup build rebuild run run-dir dub dub-audio synth clean help
+.PHONY: setup run run-dir dub dub-audio synth help
 .DEFAULT_GOAL := help
-
-IMAGE_NAME := srt-tts
 
 # LANG doubles as the shell locale variable (e.g. C.UTF-8), so `ifndef LANG`
 # alone never fires. Reject locale-looking values explicitly.
@@ -9,12 +7,6 @@ check_lang = $(if $(findstring .,$(LANG)),$(error LANG looks like a shell locale
 
 setup: ## uvで依存パッケージをインストール
 	uv sync
-
-build: ## Dockerイメージをビルド
-	docker compose build
-
-rebuild: ## Dockerイメージをキャッシュなしで再ビルド
-	docker compose build --no-cache
 
 run: ## SRTファイルを音声化 (SRT=<path> LANG=<code> [JSON_ONLY=1] [ARGS=...])
 ifndef SRT
@@ -77,9 +69,6 @@ ifndef LANG
 endif
 	$(check_lang)
 	uv run python -m src.synth $(SRT) --lang $(LANG) $(ARGS)
-
-clean: ## Dockerイメージを削除
-	docker rmi $(IMAGE_NAME) || true
 
 help: ## ヘルプを表示
 	@echo "SRT-TTS - SRTファイルをElevenLabs APIで音声化"
