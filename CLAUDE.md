@@ -113,13 +113,19 @@ SRTファイル
 - 📝 update: 更新・改善
 - 🗑️ remove: 削除
 
-**重要**: Claude Codeを使用してコミットする場合は、必ず以下の署名を含める：
+**重要**: AI の支援を受けた成果物には、**AI の支援を受けたことだけ**を明記する。製品名やモデル名は書かない（すぐ変わるため）。
 
-```text
-🤖 Generated with [Claude Code](https://claude.ai/code)
+- コミットメッセージの末尾に、次の trailer を入れる
 
-Co-Authored-By: Claude <noreply@anthropic.com>
-```
+  ```text
+  Assisted-by: AI
+  ```
+
+- PR 本文の末尾に、次の1行を入れる
+
+  ```text
+  This PR was developed with AI assistance.
+  ```
 
 ## 実装状況
 
